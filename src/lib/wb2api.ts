@@ -3,7 +3,7 @@
 //! 独立成文件,`api.ts` 不再堆网关相关代码;此处只服务 webui(不走 Tauri 双通道)。
 
 import { DEMO_UNAVAILABLE_MESSAGE, demoModeEnabled } from "./demo-mode";
-import type { Wb2apiAdminState, Wb2apiConfig, Wb2apiModel, Wb2apiModelCatalog, Wb2apiPoolAccounts, Wb2apiPoolSummary, Wb2apiStats, GatewayConfig, GatewayStatus, GatewayUpdateCheck, GatewayUpdateResult, WbVariant } from "./types";
+import type { WB2APIAdminState, WB2APIConfig, WB2APIModel, WB2APIModelCatalog, WB2APIPoolAccounts, WB2APIPoolSummary, WB2APIStats, GatewayConfig, GatewayStatus, GatewayUpdateCheck, GatewayUpdateResult, WbVariant } from "./types";
 
 /** 网关管理服务地址(与 server 默认端口一致)。 */
 const API_BASE = "http://127.0.0.1:54320";
@@ -13,7 +13,7 @@ function isWebui(): boolean {
 }
 
 
-function guardWb2api(): void {
+function guardWB2API(): void {
   if (demoModeEnabled) throw new Error(DEMO_UNAVAILABLE_MESSAGE);
   if (!isWebui()) throw new Error("网关管理仅在 webui 模式可用");
 }
@@ -28,7 +28,7 @@ async function wb2apiFetch<T>(
   path: string,
   body?: unknown,
 ): Promise<T> {
-  guardWb2api();
+  guardWB2API();
   let res: Response;
   try {
     res = await fetch(`${API_BASE}${path}`, {
@@ -53,21 +53,21 @@ async function wb2apiFetch<T>(
 /** 网关管理 API(见 server api.rs 的 /api/wb2api/* 段)。 */
 export const wb2api = {
   status: () =>
-    wb2apiFetch<Wb2apiPoolSummary>("GET", "/api/wb2api/status"),
+    wb2apiFetch<WB2APIPoolSummary>("GET", "/api/wb2api/status"),
   models: () =>
-    wb2apiFetch<{ object: string; data: Wb2apiModel[] }>("GET", "/api/wb2api/models"),
+    wb2apiFetch<{ object: string; data: WB2APIModel[] }>("GET", "/api/wb2api/models"),
   /** 模型中心:直连腾讯拉真实可用模型(失败回退上游);realm 缺省 cn。 */
   modelCatalog: (realm?: WbVariant) =>
-    wb2apiFetch<Wb2apiModelCatalog>(
+    wb2apiFetch<WB2APIModelCatalog>(
       "GET",
       `/api/wb2api/model-catalog${realm === "ai" ? "?realm=global" : ""}`,
     ),
   stats: () =>
-    wb2apiFetch<Wb2apiStats>("GET", "/api/wb2api/stats"),
+    wb2apiFetch<WB2APIStats>("GET", "/api/wb2api/stats"),
   poolAccounts: () =>
-    wb2apiFetch<Wb2apiPoolAccounts>("GET", "/api/wb2api/pool-accounts"),
+    wb2apiFetch<WB2APIPoolAccounts>("GET", "/api/wb2api/pool-accounts"),
   accountOp: (uid: string, op: "disable" | "enable" | "revive", reason?: string) =>
-    wb2apiFetch<Wb2apiAdminState>(
+    wb2apiFetch<WB2APIAdminState>(
       "POST",
       `/api/wb2api/accounts/${encodeURIComponent(uid)}/${op}`,
       reason ? { reason } : {},
@@ -79,7 +79,7 @@ export const wb2api = {
   offboard: (uid: string) =>
     wb2apiFetch<{ ok: boolean; uid: string }>("POST", "/api/wb2api/offboard", { uid }),
   getConfig: () =>
-    wb2apiFetch<Wb2apiConfig>("GET", "/api/wb2api/config"),
+    wb2apiFetch<WB2APIConfig>("GET", "/api/wb2api/config"),
   // 网关托管
   gatewayStatus: () => wb2apiFetch<GatewayStatus>("GET", "/api/wb2api/gateway"),
   gatewayStart: () => wb2apiFetch<{ ok: boolean; running: boolean }>("POST", "/api/wb2api/gateway/start", {}),

@@ -523,7 +523,7 @@ export interface CodeBuddyCnIdeSwitchResult {
 // ---------------------------------------------------------------------------
 
 /** switch 侧对接 workbuddy2api 的配置(`~/.wb-switch/gateway/wb2api.json`)。 */
-export interface Wb2apiConfig {
+export interface WB2APIConfig {
   baseUrl: string;
   apiKey: string;
   /** wb2api 部署的 `auths/` 绝对路径。 */
@@ -533,7 +533,7 @@ export interface Wb2apiConfig {
 }
 
 /** 池账号运行时状态(来自 wb2api `/status` 的 accounts 条目)。 */
-export interface Wb2apiPoolState {
+export interface WB2APIPoolState {
   uid: string;
   realm?: string;
   nickname?: string;
@@ -549,7 +549,7 @@ export interface Wb2apiPoolState {
 }
 
 /** 池账号 = auths 文件解析的凭证信息 + 运行时状态(状态可能缺失)。 */
-export interface Wb2apiPoolAccount {
+export interface WB2APIPoolAccount {
   uid: string;
   accessToken: string;
   nickname: string;
@@ -559,18 +559,18 @@ export interface Wb2apiPoolAccount {
   deviceToken?: string;
   file: string;
   /** 未在池中或 status 不可达时缺失。 */
-  pool?: Wb2apiPoolState;
+  pool?: WB2APIPoolState;
 }
 
-export interface Wb2apiPoolAccounts {
-  accounts: Wb2apiPoolAccount[];
+export interface WB2APIPoolAccounts {
+  accounts: WB2APIPoolAccount[];
   configured: boolean;
   /** `/status` 原始响应;status 不可达时为 null。 */
   pool: Record<string, unknown> | null;
 }
 
 /** `/status` 顶层汇总字段(除 accounts)。 */
-export interface Wb2apiPoolSummary {
+export interface WB2APIPoolSummary {
   total: number;
   healthy: number;
   cooling: number;
@@ -586,7 +586,7 @@ export interface Wb2apiPoolSummary {
 }
 
 /** `/v1/stats` 的单模型统计行。 */
-export interface Wb2apiStatsModel {
+export interface WB2APIStatsModel {
   model: string;
   requests: number;
   success: number;
@@ -607,17 +607,17 @@ export interface Wb2apiStatsModel {
   last_seen?: string | null;
 }
 
-export interface Wb2apiStats {
+export interface WB2APIStats {
   enabled: boolean;
   since: string;
   now: string;
   uptime_sec: number;
-  total: Wb2apiStatsModel;
-  models: Wb2apiStatsModel[];
+  total: WB2APIStatsModel;
+  models: WB2APIStatsModel[];
 }
 
 /** `/v1/models` 条目(OpenAI 格式,id 带 cn:/global: 前缀;上游已透出富字段)。 */
-export interface Wb2apiModel {
+export interface WB2APIModel {
   id: string;
   name?: string;
   description?: string;
@@ -643,14 +643,22 @@ export interface Wb2apiModel {
 }
 
 /** 模型中心返回:模型目录 + 来源元信息(直连腾讯,失败回退上游)。 */
-export interface Wb2apiModelCatalog {
-  models: Wb2apiModel[];
+export interface WB2APIModelCatalog {
+  models: WB2APIModel[];
   /** tencent | upstream */
   source: string;
   source_label: string;
   via?: string;
   errors?: string[];
   realm: string;
+}
+
+/** 网关产物描述:来源基址 + 当前版本 + 平台资产名(发新版或产物改名时改这里)。 */
+export interface GatewayArtifact {
+  source_url: string;
+  /** 当前安装的网关版本(升级成功后由后端写回)。 */
+  version: string;
+  assets?: Record<string, string>;
 }
 
 /** 网关托管配置(`~/.wb-switch/gateway/gateway.json`)。 */
@@ -668,8 +676,7 @@ export interface GatewayConfig {
   /** 积分轮转模式下的当前活跃账号 uid(巡检维护)。 */
   rotation_uid: string | null;
   auto_start: boolean;
-  /** 网关独立升级源:二进制 URL 或本地文件路径。 */
-  update_source: string;
+  artifact?: GatewayArtifact;
   /** 自动入池:开启后本地账号库的账号自动进池(仍需不在 no_sync_uids)。 */
   sync_enabled: boolean;
   /** 手动入池:显式勾选入池的账号 uid 集合。 */
@@ -683,9 +690,10 @@ export interface GatewayUpdateCheck {
   available: boolean;
   message?: string;
   source?: string;
-  path?: string;
-  url?: string;
-  size?: number;
+  /** 当前已安装版本(/healthz version,未运行则无)。 */
+  current?: string | null;
+  /** 远端 release 版本(tag)。 */
+  remote?: string | null;
 }
 
 /** 网关升级应用结果。 */
@@ -698,17 +706,18 @@ export interface GatewayUpdateResult {
   restart_error?: string;
 }
 
-/** 网关托管状态:进程/健康/端口/二进制 + 当前配置。 */
+/** 网关托管状态:进程/健康/版本/端口/二进制 + 当前配置。 */
 export interface GatewayStatus {
   running: boolean;
   healthy: boolean;
+  version?: string | null;
   port: number;
   bin?: string | null;
   config: GatewayConfig;
 }
 
 /** admin 端点响应体。 */
-export interface Wb2apiAdminState {
+export interface WB2APIAdminState {
   uid: string;
   manual_disabled: boolean;
   manual_reason?: string;

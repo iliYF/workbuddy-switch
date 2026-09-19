@@ -8,7 +8,7 @@
 //! ```
 
 mod api;
-mod wb2api_routes;
+mod wb2api;
 
 use serde_json::json;
 

@@ -1,6 +1,6 @@
 //! wb2api 网关管理路由:对接 workbuddy2api、网关托管、账号单向推送 的 HTTP 层。
 //!
-//! 独立成文件,`api.rs` 只 `.merge(wb2api_routes::router())`,保持既有文件低侵入。
+//! 独立成文件,`api.rs` 只 `.merge(wb2api::router())`,保持既有文件低侵入。
 
 use axum::extract::{Path, RawQuery};
 use axum::http::StatusCode;

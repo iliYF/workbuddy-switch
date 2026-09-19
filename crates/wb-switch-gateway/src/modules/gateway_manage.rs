@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::sync::Mutex;
 
-use wb_switch_core::modules::config::{atomic_write, http_request};
+use wb_switch_core::modules::config::{atomic_write, http_request, http_request_raw};
 
 use crate::modules::wb2api::gateway_root;
 
@@ -53,7 +53,18 @@ pub fn default_gateway_config() -> Value {
         // 积分轮转模式下的当前活跃账号(由 hub 巡检轮转维护)。
         "rotation_uid": null,
         "auto_start": false,
-        "update_source": "",
+        // 网关产物:来源基址 / 当前版本 / 平台资产名(发新版或产物改名时改这里)。
+        "artifact": {
+            "source_url": "https://github.com/iliYF/workbuddy2api/releases",
+            "version": "",
+            "assets": {
+                "darwin-arm64": "wb2api-darwin-arm64",
+                "darwin-amd64": "wb2api-darwin-amd64",
+                "windows-amd64": "wb2api-windows-amd64.exe",
+                "linux-amd64": "wb2api-linux-amd64",
+                "linux-arm64": "wb2api-linux-arm64",
+            },
+        },
         // 自动入池:开启后本地账号库的账号自动进入网关池(仍需不在 no_sync_uids)。
         "sync_enabled": false,
         // 手动入池:显式勾选要入池的账号(自动入池关闭时是唯一来源)。
@@ -71,7 +82,7 @@ pub fn generate_api_key() -> String {
 fn merge_gateway_config(input: &Value) -> Value {
     let mut merged = default_gateway_config();
     if let Some(map) = input.as_object() {
-        for key in ["bin_path", "api_key", "update_source"] {
+        for key in ["bin_path", "api_key"] {
             if let Some(v) = map.get(key).and_then(Value::as_str) {
                 if !v.trim().is_empty() {
                     merged[key] = json!(v.trim());
@@ -105,6 +116,28 @@ fn merge_gateway_config(input: &Value) -> Value {
             if let Some(v) = map.get(key).cloned() {
                 if !v.is_null() {
                     merged[key] = v;
+                }
+            }
+        }
+        // artifact:source_url / version 字符串,assets 按键覆盖(发新版或产物改名时改这里)。
+        if let Some(art) = map.get("artifact").and_then(Value::as_object) {
+            if let Some(v) = art.get("source_url").and_then(Value::as_str) {
+                if !v.trim().is_empty() {
+                    merged["artifact"]["source_url"] = json!(v.trim());
+                }
+            }
+            if let Some(v) = art.get("version").and_then(Value::as_str) {
+                if !v.trim().is_empty() {
+                    merged["artifact"]["version"] = json!(v.trim());
+                }
+            }
+            if let Some(am) = art.get("assets").and_then(Value::as_object) {
+                for (k, v) in am {
+                    if let Some(s) = v.as_str() {
+                        if !s.trim().is_empty() {
+                            merged["artifact"]["assets"][k] = json!(s.trim());
+                        }
+                    }
                 }
             }
         }
@@ -328,6 +361,13 @@ pub async fn probe_health(port: u16) -> bool {
     resp.get("service").and_then(Value::as_str) == Some("workbuddy2api")
 }
 
+/// 读取 `/healthz` 的 version 字段(构建时经 ldflags 注入,未注入为 "dev")。
+async fn probe_version(port: u16) -> Option<String> {
+    let url = format!("http://127.0.0.1:{port}/healthz");
+    let resp = http_request(&url, "GET", None, None).await;
+    resp.get("version").and_then(Value::as_str).map(str::to_string)
+}
+
 /// 启动网关:写配置 → 拉起子进程 → 健康检查重试(最多 5s)。
 pub async fn start_gateway() -> Result<Value, String> {
     if process_alive() {
@@ -387,14 +427,23 @@ pub fn stop_gateway() -> Result<Value, String> {
     Ok(json!({ "ok": true, "running": false }))
 }
 
-/// 网关运行状态:进程存活 + 健康 + 端口 + 二进制路径 + 配置。
+/// 网关运行状态:进程存活 + 健康 + 版本 + 端口 + 二进制路径 + 配置。
 pub async fn gateway_status() -> Value {
     let running = process_alive();
     let port = cfg_port();
-    let healthy = if running { probe_health(port).await } else { false };
+    let (healthy, version) = if running {
+        let url = format!("http://127.0.0.1:{port}/healthz");
+        let resp = http_request(&url, "GET", None, None).await;
+        let healthy = resp.get("service").and_then(Value::as_str) == Some("workbuddy2api");
+        let version = resp.get("version").and_then(Value::as_str).map(str::to_string);
+        (healthy, version)
+    } else {
+        (false, None)
+    };
     json!({
         "running": running,
         "healthy": healthy,
+        "version": version,
         "port": port,
         "bin": locate_gateway().map(|p| p.to_string_lossy().to_string()),
         "config": load_gateway_config(),
@@ -405,55 +454,124 @@ pub async fn gateway_status() -> Value {
 // 网关独立升级(与客户端升级解耦)
 // ---------------------------------------------------------------------------
 
-fn cfg_update_source() -> String {
-    cfg_str("update_source")
+/// artifact.source_url:网关 release 基址(配一次不动)。
+fn cfg_source_url() -> String {
+    load_gateway_config()
+        .get("artifact")
+        .and_then(|a| a.get("source_url"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string()
 }
 
-/// 检查更新源:本地路径则报 size;URL 则 HEAD 探测可达性。
+/// artifact.version:当前记录版本(升级成功后写回,与 /healthz 一致)。
+fn cfg_artifact_version() -> String {
+    load_gateway_config()
+        .get("artifact")
+        .and_then(|a| a.get("version"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string()
+}
+
+/// 平台键(artifact.assets 查询用):OS/arch → 稳定键,产物名可经配置覆盖。
+fn platform_key() -> &'static str {
+    match (std::env::consts::OS, std::env::consts::ARCH) {
+        ("macos", "aarch64") => "darwin-arm64",
+        ("macos", "x86_64") => "darwin-amd64",
+        ("windows", "x86_64") => "windows-amd64",
+        ("linux", "x86_64") => "linux-amd64",
+        ("linux", "aarch64") => "linux-arm64",
+        _ => "unknown",
+    }
+}
+
+/// 平台对应的 release 产物名:读配置 `artifact.assets[platform_key()]`,缺省回落 "wb2api"。
+fn platform_asset() -> String {
+    load_gateway_config()
+        .get("artifact")
+        .and_then(|a| a.get("assets"))
+        .and_then(|m| m.get(platform_key()))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("wb2api")
+        .to_string()
+}
+
+/// 从 `{source_url}.atom` 取最新 release tag(第一个 `<entry>` 的 `<title>`)。
+/// GitHub 原生 feed,无需 API 鉴权/限流;无 stable 时也能给出最新 canary tag。
+async fn fetch_latest_tag(src: &str) -> Option<String> {
+    let url = format!("{}.atom", src.trim_end_matches('/'));
+    let (status, _, body) = http_request_raw(&url, "GET", None, None, None, true).await;
+    if status != 200 {
+        return None;
+    }
+    // feed 级 <title> 在 <entry> 之前,须从第一个 <entry> 之后取 <title>。
+    let body = &body[body.find("<entry>")?..];
+    let (a, b) = (body.find("<title>")?, body.find("</title>")?);
+    if a >= b {
+        return None;
+    }
+    let tag = body[a + "<title>".len()..b].trim();
+    (!tag.is_empty()).then(|| tag.to_string())
+}
+
+/// 检查网关更新:远端取 releases.atom 最新 tag,对比当前版本(/healthz,网关未跑则用 artifact.version)。
 pub async fn check_gateway_update() -> Value {
-    let src = cfg_update_source();
+    let src = cfg_source_url();
     if src.is_empty() {
-        return json!({ "available": false, "message": "未配置更新源(update_source)" });
+        return json!({ "available": false, "message": "未配置 artifact.source_url" });
     }
-    let path = std::path::Path::new(&src);
-    if path.exists() {
-        let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
-        return json!({ "available": true, "source": "local", "path": src, "size": size });
-    }
-    let client = match reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => return json!({ "available": false, "message": format!("HTTP 客户端失败: {e}") }),
+    let current = if process_alive() {
+        probe_version(cfg_port()).await.or_else(|| {
+            let v = cfg_artifact_version();
+            (!v.is_empty()).then_some(v)
+        })
+    } else {
+        let v = cfg_artifact_version();
+        (!v.is_empty()).then_some(v)
     };
-    match client.head(&src).send().await {
-        Ok(resp) if resp.status().is_success() => {
-            json!({ "available": true, "source": "url", "url": src })
-        }
-        Ok(resp) => json!({ "available": false, "message": format!("更新源响应 {}", resp.status()) }),
-        Err(e) => json!({ "available": false, "message": format!("更新源不可达: {e}") }),
-    }
+    let Some(remote) = fetch_latest_tag(&src).await else {
+        return json!({
+            "available": false,
+            "current": current,
+            "remote": Value::Null,
+            "message": "无法读取远端 release 版本(releases.atom)",
+        });
+    };
+    let updatable = current.as_deref() != Some(remote.as_str());
+    let message = match (&current, updatable) {
+        (Some(c), true) => format!("发现新版本 {remote}(当前 {c})"),
+        (Some(_), false) => format!("已是最新({remote})"),
+        (None, _) => format!("远端 {remote},当前版本未知(网关未运行)"),
+    };
+    json!({
+        "available": updatable,
+        "current": current,
+        "remote": remote,
+        "source": src,
+        "message": message,
+    })
 }
 
-/// 下载(或拷贝本地)并原子替换网关二进制;可选 sha256 校验;网关在跑则用新二进制重启。
+/// 下载并原子替换网关二进制;可选 sha256 校验;网关在跑则用新二进制重启。
+/// 目标版本取 releases.atom 最新 tag,下载 `{source_url}/download/{tag}/{asset}`;
+/// 成功后把 artifact.version 写回为该 tag(与 /healthz 一致)。
 pub async fn apply_gateway_update(sha256: Option<&str>) -> Result<Value, String> {
-    let src = cfg_update_source();
+    let src = cfg_source_url();
     if src.is_empty() {
-        return Err("未配置更新源(update_source)".to_string());
+        return Err("未配置 artifact.source_url".to_string());
     }
-    std::fs::create_dir_all(gateway_bin_dir()).map_err(|e| e.to_string())?;
-
-    let path = std::path::Path::new(&src);
-    let bytes = if path.exists() {
-        std::fs::read(path).map_err(|e| format!("读取本地更新文件失败: {e}"))?
-    } else {
-        let resp = reqwest::get(&src).await.map_err(|e| format!("下载失败: {e}"))?;
-        if !resp.status().is_success() {
-            return Err(format!("下载失败: HTTP {}", resp.status()));
-        }
-        resp.bytes().await.map_err(|e| format!("读取下载内容失败: {e}"))?.to_vec()
-    };
+    let tag = fetch_latest_tag(&src).await.ok_or("无法解析远端最新版本(releases.atom)")?;
+    let url = format!("{}/download/{tag}/{}", src.trim_end_matches('/'), platform_asset());
+    let resp = reqwest::get(&url).await.map_err(|e| format!("下载失败: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("下载失败: HTTP {}", resp.status()));
+    }
+    let bytes = resp.bytes().await.map_err(|e| format!("读取下载内容失败: {e}"))?.to_vec();
     if bytes.is_empty() {
         return Err("下载内容为空".to_string());
     }
@@ -483,8 +601,14 @@ pub async fn apply_gateway_update(sha256: Option<&str>) -> Result<Value, String>
         let _ = std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755));
     }
 
+    // 记录当前版本到 artifact.version(与 /healthz 保持一致)。
+    let mut cfg = load_gateway_config();
+    cfg["artifact"]["version"] = json!(tag);
+    let _ = save_gateway_config(&cfg);
+
     let mut out = json!({
         "ok": true,
+        "version": tag,
         "bin": target.to_string_lossy(),
         "size": bytes.len(),
     });

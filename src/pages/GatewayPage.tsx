@@ -47,11 +47,11 @@ import { wb2api } from "@/lib/wb2api";
 import type {
   GatewayConfig,
   GatewayStatus,
-  Wb2apiConfig,
-  Wb2apiModel,
-  Wb2apiPoolAccounts,
-  Wb2apiPoolSummary,
-  Wb2apiStats,
+  WB2APIConfig,
+  WB2APIModel,
+  WB2APIPoolAccounts,
+  WB2APIPoolSummary,
+  WB2APIStats,
 } from "@/lib/types";
 import { useAccountsStore } from "@/stores/accounts";
 import { cn } from "@/lib/utils";
@@ -59,7 +59,7 @@ import { cn } from "@/lib/utils";
 /** 托管网关(wb2api)上游项目主页。 */
 const GATEWAY_REPO_URL = "https://github.com/Sliverkiss/workbuddy2api";
 
-function StatusBadge({ state }: { state: Wb2apiPoolAccounts["accounts"][number]["pool"] }) {
+function StatusBadge({ state }: { state: WB2APIPoolAccounts["accounts"][number]["pool"] }) {
   if (!state) return <Badge variant="secondary">未在池中</Badge>;
   if (state.manual_disabled) return <Badge variant="destructive">手动停用</Badge>;
   if (state.disabled) return <Badge variant="destructive">禁用</Badge>;
@@ -131,7 +131,7 @@ function Stat({
   );
 }
 
-function SummaryStats({ summary }: { summary: Wb2apiPoolSummary | null }) {
+function SummaryStats({ summary }: { summary: WB2APIPoolSummary | null }) {
   return (
     <div className="mx-4 grid grid-cols-2 gap-2 py-3 sm:mx-5 sm:grid-cols-4">
       <Stat label="总数" value={summary?.total ?? "—"} />
@@ -146,11 +146,11 @@ export default function GatewayPage() {
   const localAccounts = useAccountsStore((s) => s.accounts);
   const reconcileAccounts = useAccountsStore((s) => s.reconcileAccounts);
 
-  const [config, setConfig] = useState<Wb2apiConfig | null>(null);
-  const [pool, setPool] = useState<Wb2apiPoolAccounts | null>(null);
-  const [summary, setSummary] = useState<Wb2apiPoolSummary | null>(null);
-  const [stats, setStats] = useState<Wb2apiStats | null>(null);
-  const [models, setModels] = useState<Wb2apiModel[]>([]);
+  const [config, setConfig] = useState<WB2APIConfig | null>(null);
+  const [pool, setPool] = useState<WB2APIPoolAccounts | null>(null);
+  const [summary, setSummary] = useState<WB2APIPoolSummary | null>(null);
+  const [stats, setStats] = useState<WB2APIStats | null>(null);
+  const [models, setModels] = useState<WB2APIModel[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState("gateway");
@@ -165,7 +165,7 @@ export default function GatewayPage() {
   const [oauthOpen, setOauthOpen] = useState(false);
 
   // 对接配置(由网关设置自动派生,只读用于状态判断)
-  const [form, setForm] = useState<Wb2apiConfig | null>(null);
+  const [form, setForm] = useState<WB2APIConfig | null>(null);
 
   const [showKey, setShowKey] = useState(false);
   const [connOpen, setConnOpen] = useState(false);
@@ -372,15 +372,15 @@ export default function GatewayPage() {
     }
   }
 
-  /** 检查网关升级(探测更新源可达性)。 */
+  /** 检查网关升级(远端 release tag 与当前版本对比)。 */
   async function handleGwCheckUpdate() {
     setGwUpdating("check");
     try {
       const r = await wb2api.gatewayCheckUpdate();
       setGwUpdateMsg(
         r.available
-          ? `更新可用: ${r.path || r.url || ""}${r.size ? ` (${r.size} 字节)` : ""}`
-          : `无可用更新: ${r.message ?? "更新源未配置"}`,
+          ? `发现新版本: ${r.remote ?? "—"}${r.current ? `(当前 ${r.current})` : ""}`
+          : r.message || "已是最新",
       );
     } catch (e) {
       setGwUpdateMsg(asError(e));
@@ -454,7 +454,7 @@ export default function GatewayPage() {
   }, [models]);
 
   const modelGroups = useMemo(() => {
-    const groups = new Map<string, Wb2apiModel[]>();
+    const groups = new Map<string, WB2APIModel[]>();
     const q = modelQuery.trim().toLowerCase();
     for (const m of models) {
       if (
@@ -1131,7 +1131,11 @@ export default function GatewayPage() {
               <div className="min-w-0">
                 <div className="text-[13px]">运行版本</div>
                 <div className="mt-0.5 truncate text-xs text-muted-foreground">
-                  {gw?.bin ? gw.bin.split("/").pop() : "未定位到网关二进制"}
+                  {gw?.version
+                    ? `版本 ${gw.version}`
+                    : gw?.bin
+                      ? gw.bin.split("/").pop()
+                      : "未定位到网关二进制"}
                   {gw?.running ? " · 运行中" : " · 未运行"}
                 </div>
               </div>

@@ -15,6 +15,8 @@ import {
   Copy,
   Recycle,
   Wand2,
+  Download,
+  ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -51,6 +53,9 @@ import type {
 } from "@/lib/types";
 import { useAccountsStore } from "@/stores/accounts";
 import { cn } from "@/lib/utils";
+
+/** 托管网关(wb2api)上游项目主页。 */
+const GATEWAY_REPO_URL = "https://github.com/Sliverkiss/workbuddy2api";
 
 function StatusBadge({ state }: { state: Wb2apiPoolAccounts["accounts"][number]["pool"] }) {
   if (!state) return <Badge variant="secondary">未在池中</Badge>;
@@ -147,7 +152,10 @@ export default function GatewayPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState("gateway");
-  const [gwSubTab, setGwSubTab] = useState("status");
+
+  // 「关于」:网关升级
+  const [gwUpdating, setGwUpdating] = useState<string | null>(null);
+  const [gwUpdateMsg, setGwUpdateMsg] = useState("");
 
   // 纳管
   const [selectedAccountId, setSelectedAccountId] = useState("");
@@ -356,6 +364,41 @@ export default function GatewayPage() {
       toast.success("已生成访问密钥(记得保存)");
     } catch (e) {
       toast.error("生成失败", { description: asError(e) });
+    }
+  }
+
+  /** 检查网关升级(探测更新源可达性)。 */
+  async function handleGwCheckUpdate() {
+    setGwUpdating("check");
+    try {
+      const r = await api.wb2api.gatewayCheckUpdate();
+      setGwUpdateMsg(
+        r.available
+          ? `更新可用: ${r.path || r.url || ""}${r.size ? ` (${r.size} 字节)` : ""}`
+          : `无可用更新: ${r.message ?? "更新源未配置"}`,
+      );
+    } catch (e) {
+      setGwUpdateMsg(asError(e));
+    } finally {
+      setGwUpdating(null);
+    }
+  }
+
+  /** 下载并替换网关二进制(网关在跑则重启)。 */
+  async function handleGwApplyUpdate() {
+    setGwUpdating("apply");
+    try {
+      const r = await api.wb2api.gatewayApplyUpdate();
+      setGwUpdateMsg(
+        r.ok
+          ? `已更新(${r.size} 字节)${r.restarted ? ",网关已重启" : ""}${r.restart_error ? `,重启失败: ${r.restart_error}` : ""}`
+          : "更新失败",
+      );
+      await refreshGw();
+    } catch (e) {
+      setGwUpdateMsg(`更新失败: ${asError(e)}`);
+    } finally {
+      setGwUpdating(null);
     }
   }
 
@@ -698,15 +741,7 @@ export default function GatewayPage() {
         </TabsContent>
 
         <TabsContent value="gateway" className="space-y-6">
-          <Tabs value={gwSubTab} onValueChange={setGwSubTab}>
-            <TabsList>
-              <TabsTrigger value="status">状态</TabsTrigger>
-              <TabsTrigger value="settings">设置</TabsTrigger>
-              <TabsTrigger value="accounts">账号池</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="status" className="space-y-6">
-              <Section title="运行状态" description="账号池状态每 20 秒自动刷新">
+          <Section title="运行状态" description="账号池状态每 20 秒自动刷新">
               <div className="mx-4 grid grid-cols-2 gap-2 py-3 sm:mx-5 sm:grid-cols-4">
                 <Stat
                   label="服务状态"
@@ -758,11 +793,9 @@ export default function GatewayPage() {
                 </Button>
               </Row>
               {syncResult && <div className="mx-4 pb-3 text-[11px] text-muted-foreground sm:mx-5">{syncResult}</div>}
-              </Section>
-            </TabsContent>
+          </Section>
 
-            <TabsContent value="settings" className="space-y-6">
-              <Section title="网关设置" description="工作模式、服务端口与访问密钥(保存后生效)">
+          <Section title="基本设置" description="工作模式、服务端口与访问密钥(保存后生效)">
               <Row className="flex-col items-stretch gap-2 sm:flex-row sm:items-center">
                 <div className="min-w-0">
                   <div className="text-[13px]">工作模式</div>
@@ -916,18 +949,16 @@ export default function GatewayPage() {
                   保存网关配置
                 </Button>
               </div>
-              </Section>
-            </TabsContent>
+          </Section>
 
-            <TabsContent value="accounts" className="space-y-6">
-              <Section
-                title="池内账号"
-                description={
-                  pool?.configured
-                    ? `${pool.accounts.length} 个账号在网关池中;状态来自 /status`
-                    : "未配置 authDir,仅显示池状态"
-                }
-              >
+          <Section
+            title="账号池"
+            description={
+              pool?.configured
+                ? `${pool.accounts.length} 个账号在网关池中;状态来自 /status`
+                : "未配置 authDir,仅显示池状态"
+            }
+          >
                 <div className="min-w-0 px-4 pt-3 pb-4 sm:px-5">
                   {loading && !pool ? (
                     <Skeleton className="h-24 w-full" />
@@ -982,9 +1013,9 @@ export default function GatewayPage() {
                     </Table>
                   )}
                 </div>
-              </Section>
 
-              <Section title="添加账号入池" description="选择本地账号库中的账号入池;也可扫码新增账号">
+              <div className="border-t border-border/50">
+                <div className="px-4 pt-3 text-[13px] font-medium sm:px-5">添加账号入池</div>
                 <div className="flex flex-wrap items-end gap-3 px-4 py-3 sm:px-5">
                   <div className="min-w-[220px] flex-1 space-y-1.5">
                     <Label>选择本地账号</Label>
@@ -1011,9 +1042,10 @@ export default function GatewayPage() {
                     <ArrowLeftRight className="size-4" /> 扫码新增账号
                   </Button>
                 </div>
-              </Section>
+              </div>
 
-              <Section title="入池策略" description="手动勾选入池、自动入池与永不入池名单">
+              <div className="border-t border-border/50">
+                <div className="px-4 pt-3 text-[13px] font-medium sm:px-5">入池策略</div>
                 <Row>
                   <div className="min-w-0">
                     <div className="text-[13px]">自动入池</div>
@@ -1067,9 +1099,48 @@ export default function GatewayPage() {
                     保存配置
                   </Button>
                 </div>
-              </Section>
-            </TabsContent>
-          </Tabs>
+              </div>
+          </Section>
+
+          <Section title="关于" description="托管网关(wb2api)的基本信息与升级">
+            <Row>
+              <div className="min-w-0">
+                <div className="text-[13px]">运行版本</div>
+                <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                  {gw?.bin ? gw.bin.split("/").pop() : "未定位到网关二进制"}
+                  {gw?.running ? " · 运行中" : " · 未运行"}
+                </div>
+              </div>
+              <div className="flex shrink-0 items-center gap-1.5">
+                <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs" onClick={() => void handleGwCheckUpdate()} disabled={gwUpdating !== null}>
+                  <RefreshCw className={cn("size-3.5", gwUpdating === "check" && "animate-spin")} /> 检查升级
+                </Button>
+                <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => void handleGwApplyUpdate()} disabled={gwUpdating !== null}>
+                  <Download className="size-3.5" /> 升级
+                </Button>
+              </div>
+            </Row>
+            <Row>
+              <div className="min-w-0">
+                <div className="text-[13px]">项目主页</div>
+                <div className="mt-0.5 text-[11px] text-muted-foreground">workbuddy2api(上游 OpenAI 兼容网关)</div>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 gap-1.5 text-xs"
+                onClick={() => window.open(GATEWAY_REPO_URL, "_blank", "noopener,noreferrer")}
+              >
+                <ExternalLink className="size-3.5" /> 打开 GitHub
+              </Button>
+            </Row>
+            {gwUpdateMsg && <div className="mx-4 pb-3 text-[11px] text-muted-foreground sm:mx-5">{gwUpdateMsg}</div>}
+            <div className="flex justify-end px-4 py-3 sm:px-5">
+              <Button onClick={() => void handleGwSaveConfig()} disabled={!gwForm}>
+                保存网关配置
+              </Button>
+            </div>
+          </Section>
         </TabsContent>
       </Tabs>
 

@@ -8,7 +8,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use axum::body::Body;
-use axum::extract::RawQuery;
+use axum::extract::{Path, RawQuery};
 use axum::http::{header, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -21,6 +21,7 @@ use wb_switch_core::modules::{
     credit_usage, credits, export_import, limits, oauth, process, rate_limit_events,
     rate_limit_hook, refresh, rotate, session, switch, token_stats, travel, update,
     variant::WbVariant,
+    wb2api,
 };
 
 /// WorkBuddy 运行状态缓存：Windows 上检测要跑 tasklist（慢），缓存几秒避免
@@ -140,6 +141,33 @@ pub fn router() -> Router {
         .route(
             "/api/update/config",
             get(api_update_config).post(api_save_update_config),
+        )
+        // workbuddy-hub 网关对接(workbuddy2api 管理面,additive 路由段)
+        .route("/api/wb2api/status", get(api_wb2api_status))
+        .route("/api/wb2api/models", get(api_wb2api_models))
+        .route("/api/wb2api/stats", get(api_wb2api_stats))
+        .route("/api/wb2api/pool-accounts", get(api_wb2api_pool_accounts))
+        .route(
+            "/api/wb2api/accounts/{uid}/disable",
+            post(api_wb2api_account_disable),
+        )
+        .route(
+            "/api/wb2api/accounts/{uid}/enable",
+            post(api_wb2api_account_enable),
+        )
+        .route(
+            "/api/wb2api/accounts/{uid}/revive",
+            post(api_wb2api_account_revive),
+        )
+        .route("/api/wb2api/onboard", post(api_wb2api_onboard))
+        .route("/api/wb2api/offboard", post(api_wb2api_offboard))
+        .route(
+            "/api/wb2api/config",
+            get(api_wb2api_config_get).post(api_wb2api_config_save),
+        )
+        .route(
+            "/api/wb2api/upstream-config",
+            get(api_wb2api_upstream_config_get).post(api_wb2api_upstream_config_save),
         )
         .fallback(static_handler)
 }
@@ -787,6 +815,104 @@ async fn api_save_update_config(Json(body): Json<Value>) -> Response {
     match update::save_github_config(&body) {
         Ok(()) => json_ok(json!({ "ok": true, "config": update::load_github_config() })),
         Err(e) => json_err(e.to_string(), StatusCode::BAD_REQUEST),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// wb2api 网关对接(workbuddy-hub 管理面)
+// ---------------------------------------------------------------------------
+
+async fn api_wb2api_status() -> Response {
+    match wb2api::status().await {
+        Ok(v) => json_ok(v),
+        Err(e) => json_err(e, StatusCode::BAD_GATEWAY),
+    }
+}
+
+async fn api_wb2api_models() -> Response {
+    match wb2api::models().await {
+        Ok(v) => json_ok(v),
+        Err(e) => json_err(e, StatusCode::BAD_GATEWAY),
+    }
+}
+
+async fn api_wb2api_stats() -> Response {
+    match wb2api::stats().await {
+        Ok(v) => json_ok(v),
+        Err(e) => json_err(e, StatusCode::BAD_GATEWAY),
+    }
+}
+
+async fn api_wb2api_pool_accounts() -> Response {
+    json_ok(wb2api::pool_accounts().await)
+}
+
+async fn api_wb2api_account_disable(Path(uid): Path<String>, Json(body): Json<Value>) -> Response {
+    let reason = body.get("reason").and_then(Value::as_str).unwrap_or("");
+    match wb2api::account_op(&uid, "disable", reason).await {
+        Ok(v) => json_ok(v),
+        Err(e) => json_err(e, StatusCode::BAD_REQUEST),
+    }
+}
+
+async fn api_wb2api_account_enable(Path(uid): Path<String>, _body: Option<Json<Value>>) -> Response {
+    match wb2api::account_op(&uid, "enable", "").await {
+        Ok(v) => json_ok(v),
+        Err(e) => json_err(e, StatusCode::BAD_REQUEST),
+    }
+}
+
+async fn api_wb2api_account_revive(Path(uid): Path<String>, _body: Option<Json<Value>>) -> Response {
+    match wb2api::account_op(&uid, "revive", "").await {
+        Ok(v) => json_ok(v),
+        Err(e) => json_err(e, StatusCode::BAD_REQUEST),
+    }
+}
+
+async fn api_wb2api_onboard(Json(body): Json<Value>) -> Response {
+    let account_id = body.get("accountId").and_then(Value::as_str).unwrap_or("");
+    match wb2api::onboard(account_id) {
+        Ok(v) => json_ok(v),
+        Err(e) => json_err(e, StatusCode::BAD_REQUEST),
+    }
+}
+
+async fn api_wb2api_offboard(Json(body): Json<Value>) -> Response {
+    let uid = body.get("uid").and_then(Value::as_str).unwrap_or("");
+    match wb2api::offboard(uid) {
+        Ok(v) => json_ok(v),
+        Err(e) => json_err(e, StatusCode::BAD_REQUEST),
+    }
+}
+
+/// switch 侧对接配置(读)。
+async fn api_wb2api_config_get() -> Response {
+    json_ok(wb2api::load_wb2api_config())
+}
+
+/// switch 侧对接配置(存)。
+async fn api_wb2api_config_save(Json(body): Json<Value>) -> Response {
+    let submitted = body.get("config").unwrap_or(&body);
+    match wb2api::save_wb2api_config(submitted) {
+        Ok(()) => json_ok(wb2api::load_wb2api_config()),
+        Err(e) => json_err(e.to_string(), StatusCode::BAD_REQUEST),
+    }
+}
+
+/// 上游 wb2api config.json(读)。
+async fn api_wb2api_upstream_config_get() -> Response {
+    match wb2api::upstream_config_get() {
+        Ok(v) => json_ok(v),
+        Err(e) => json_err(e, StatusCode::BAD_REQUEST),
+    }
+}
+
+/// 上游 wb2api config.json(写,自动备份)。
+async fn api_wb2api_upstream_config_save(Json(body): Json<Value>) -> Response {
+    let submitted = body.get("config").unwrap_or(&body);
+    match wb2api::upstream_config_save(submitted) {
+        Ok(v) => json_ok(v),
+        Err(e) => json_err(e, StatusCode::BAD_REQUEST),
     }
 }
 

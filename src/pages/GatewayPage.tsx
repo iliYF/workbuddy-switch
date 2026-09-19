@@ -54,8 +54,8 @@ function SummaryCards({ summary }: { summary: Wb2apiPoolSummary | null }) {
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
       {items.map((item) => (
-        <Card key={item.label}>
-          <CardContent className="py-4 text-center">
+        <Card key={item.label} className="min-w-0 gap-0 overflow-hidden rounded-xl py-0 shadow-none">
+          <CardContent className="min-w-0 px-4 py-4 text-center">
             <div className="text-2xl font-semibold tabular-nums">{item.value}</div>
             <div className="text-xs text-muted-foreground">{item.label}</div>
           </CardContent>
@@ -363,7 +363,7 @@ export default function GatewayPage() {
   // 接入信息(cc-switch / OpenAI 兼容客户端)
   const connBaseUrl = (config?.baseUrl || form?.baseUrl || "").trim().replace(/\/+$/, "");
   const connApiKey = config?.apiKey || form?.apiKey || "";
-  const connBaseUrlV1 = `${connBaseUrl || "http://127.0.0.1:7863"}/v1`;
+  const connBaseUrlV1 = `${connBaseUrl || "http://127.0.0.1:54321"}/v1`;
   const maskedKey = connApiKey ? `${connApiKey.slice(0, 4)}••••${connApiKey.slice(-4)}` : "(未配置,填写 apiKey 后生效)";
   const sampleModels = models.slice(0, 8).map((m) => m.id);
 
@@ -436,31 +436,23 @@ export default function GatewayPage() {
   }, [oauthOpen, reconcileAccounts]);
 
   return (
-    <div className="mx-auto max-w-5xl space-y-4 p-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="flex items-center gap-2 text-lg font-semibold">
-            <Server className="size-5" /> 网关管理
-          </h1>
-          <p className="text-sm text-muted-foreground">
+    <div className="mx-auto w-full max-w-[1180px] min-w-0 px-4 py-6 sm:px-8 sm:py-9">
+      <header className="mb-6 flex min-w-0 flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="text-[28px] font-semibold tracking-tight">网关管理</h1>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
             对接 workbuddy2api:纳管账号入池、查看池状态与用量、维护配置。
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setConnOpen(true)}
-            title="接入配置(WorkBuddy Provider)"
-            aria-label="接入配置"
-          >
-            <Plug className="size-4" />
+          <Button variant="outline" size="sm" onClick={() => setConnOpen(true)}>
+            <Plug className="size-4" /> 接入配置
           </Button>
           <Button variant="outline" size="sm" onClick={() => void loadAll()} disabled={loading}>
             <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} /> 刷新
           </Button>
         </div>
-      </div>
+      </header>
 
       <Dialog open={connOpen} onOpenChange={setConnOpen}>
         <DialogContent>
@@ -527,7 +519,7 @@ export default function GatewayPage() {
               <li>打开 cc-switch,新建 Provider(类型按客户端选:Claude Code 走 Anthropic / Codex、Cherry Studio 等走 OpenAI)</li>
               <li>
                 Base URL:OpenAI 兼容客户端填 <code>{connBaseUrlV1}</code>;Anthropic 客户端(Claude Code)填{" "}
-                <code>{connBaseUrl || "http://127.0.0.1:7863"}</code>(不带 /v1)
+                <code>{connBaseUrl || "http://127.0.0.1:54321"}</code>(不带 /v1)
               </li>
               <li>API Key 填上方密钥(直连 wb2api 用 apiKey;若走 manager 网关用其签发的 wbk_ 密钥)</li>
               <li>模型填上方列表中的带前缀模型名(如 cn:hy3-x),可自定义)</li>
@@ -575,15 +567,15 @@ export default function GatewayPage() {
             <>
               <SummaryCards summary={summary} />
 
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">纳管账号</CardTitle>
+              <Card className="min-w-0 gap-0 overflow-hidden rounded-xl py-0 shadow-none">
+                <CardHeader className="border-b px-4 py-3 sm:px-5">
+                  <CardTitle>纳管账号</CardTitle>
                   <CardDescription>
                     把本地账号库的账号推入网关池(写入 auths 目录,5s 热加载)。
                     与桌面切换共用同一批腾讯账号。
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-3">
+                <CardContent className="min-w-0 px-4 pt-3 pb-4 sm:px-5 space-y-3">
                   <div className="flex flex-wrap items-end gap-3">
                     <div className="min-w-[220px] flex-1 space-y-1.5">
                       <Label>选择本地账号</Label>
@@ -643,16 +635,16 @@ export default function GatewayPage() {
                 </CardContent>
               </Card>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">池账号</CardTitle>
+              <Card className="min-w-0 gap-0 overflow-hidden rounded-xl py-0 shadow-none">
+                <CardHeader className="border-b px-4 py-3 sm:px-5">
+                  <CardTitle>池账号</CardTitle>
                   <CardDescription>
                     {pool?.configured
                       ? `${pool.accounts.length} 个凭证文件;状态来自 /status`
                       : "未配置 authDir,仅显示池状态"}
                   </CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="min-w-0 px-4 pt-3 pb-4 sm:px-5">
                   {loading && !pool ? (
                     <Skeleton className="h-24 w-full" />
                   ) : pool && pool.accounts.length === 0 ? (
@@ -719,16 +711,16 @@ export default function GatewayPage() {
           {configured ? (
             <>
               <SummaryCards summary={summary} />
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">模型中心</CardTitle>
+              <Card className="min-w-0 gap-0 overflow-hidden rounded-xl py-0 shadow-none">
+                <CardHeader className="border-b px-4 py-3 sm:px-5">
+                  <CardTitle>模型中心</CardTitle>
                   <CardDescription>
                     共 {modelSummary.total} 个 · 推理 {modelSummary.reasoning} · 大上下文(≥128K){" "}
                     {modelSummary.large} · 最大上下文 {modelSummary.maxCtx.toLocaleString()} · 来源{" "}
                     {catalogSource}
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
+                <CardContent className="min-w-0 px-4 pt-3 pb-4 sm:px-5 space-y-4">
                   {models.length === 0 ? (
                     <p className="text-sm text-muted-foreground">暂无模型(可能无健康账号或拉取失败)。</p>
                   ) : (
@@ -802,12 +794,12 @@ export default function GatewayPage() {
                   )}
                 </CardContent>
               </Card>
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">请求统计</CardTitle>
+              <Card className="min-w-0 gap-0 overflow-hidden rounded-xl py-0 shadow-none">
+                <CardHeader className="border-b px-4 py-3 sm:px-5">
+                  <CardTitle>请求统计</CardTitle>
                   <CardDescription>来自 /v1/stats(进程内计数,重启清零)</CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="min-w-0 px-4 pt-3 pb-4 sm:px-5">
                   {!stats || stats.models.length === 0 ? (
                     <p className="text-sm text-muted-foreground">暂无统计。</p>
                   ) : (
@@ -845,16 +837,16 @@ export default function GatewayPage() {
         </TabsContent>
 
         <TabsContent value="config" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">对接配置</CardTitle>
+          <Card className="min-w-0 gap-0 overflow-hidden rounded-xl py-0 shadow-none">
+            <CardHeader className="border-b px-4 py-3 sm:px-5">
+              <CardTitle>对接配置</CardTitle>
               <CardDescription>存于 ~/.wbh/wb2api.json(workbuddy-hub 数据根)</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="min-w-0 px-4 pt-3 pb-4 sm:px-5 space-y-3">
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label>baseUrl</Label>
-                  <Input value={form?.baseUrl ?? ""} onChange={set("baseUrl")} placeholder="http://127.0.0.1:7863" />
+                  <Input value={form?.baseUrl ?? ""} onChange={set("baseUrl")} placeholder="http://127.0.0.1:54321" />
                 </div>
                 <div className="space-y-1.5">
                   <Label>apiKey</Label>
@@ -877,15 +869,15 @@ export default function GatewayPage() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">上游 config.json</CardTitle>
+          <Card className="min-w-0 gap-0 overflow-hidden rounded-xl py-0 shadow-none">
+            <CardHeader className="border-b px-4 py-3 sm:px-5">
+              <CardTitle>上游 config.json</CardTitle>
               <CardDescription>
                 直接编辑 wb2api 的 config.json(仅本机可用;保存前自动备份为 .bak,需先配置 configPath)。
                 改 admin.enabled / global.enabled / cooldown 等需重启 wb2api 生效。
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="min-w-0 px-4 pt-3 pb-4 sm:px-5 space-y-3">
               <div className="flex items-center gap-2">
                 <Button variant="outline" size="sm" onClick={() => void handleLoadUpstream()} disabled={loadingUpstream}>
                   {loadingUpstream ? "读取中…" : "读取 config.json"}
@@ -907,12 +899,12 @@ export default function GatewayPage() {
         </TabsContent>
 
         <TabsContent value="gateway" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">网关运行状态</CardTitle>
+          <Card className="min-w-0 gap-0 overflow-hidden rounded-xl py-0 shadow-none">
+            <CardHeader className="border-b px-4 py-3 sm:px-5">
+              <CardTitle>网关运行状态</CardTitle>
               <CardDescription>托管独立的 workbuddy2api 二进制;启动/停止即时生效,健康经 /healthz 校验。</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
+            <CardContent className="min-w-0 px-4 pt-3 pb-4 sm:px-5 space-y-4">
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <div className="space-y-1">
                   <Label>运行状态</Label>
@@ -952,9 +944,9 @@ export default function GatewayPage() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">工作模式与端口</CardTitle>
+          <Card className="min-w-0 gap-0 overflow-hidden rounded-xl py-0 shadow-none">
+            <CardHeader className="border-b px-4 py-3 sm:px-5">
+              <CardTitle>工作模式与端口</CardTitle>
               <CardDescription>负载均衡使用全部入池账号;指定账号则只走所选账号(从账号池选择)。</CardDescription>
             </CardHeader>
             <CardContent className="grid gap-3 sm:grid-cols-2">
@@ -1027,12 +1019,12 @@ export default function GatewayPage() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">基本配置</CardTitle>
+          <Card className="min-w-0 gap-0 overflow-hidden rounded-xl py-0 shadow-none">
+            <CardHeader className="border-b px-4 py-3 sm:px-5">
+              <CardTitle>基本配置</CardTitle>
               <CardDescription>密钥、二进制路径、升级源、随 App 启动、自动同步入池。</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="min-w-0 px-4 pt-3 pb-4 sm:px-5 space-y-3">
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label>api_key(留空=不鉴权)</Label>
@@ -1069,9 +1061,9 @@ export default function GatewayPage() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">独立升级</CardTitle>
+          <Card className="min-w-0 gap-0 overflow-hidden rounded-xl py-0 shadow-none">
+            <CardHeader className="border-b px-4 py-3 sm:px-5">
+              <CardTitle>独立升级</CardTitle>
               <CardDescription>与客户端升级解耦;从 update_source 下载/替换网关二进制,网关在跑则重启。</CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">

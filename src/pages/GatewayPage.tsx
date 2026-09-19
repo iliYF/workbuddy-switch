@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -81,6 +82,7 @@ export default function GatewayPage() {
   const [upstreamPath, setUpstreamPath] = useState("");
   const [loadingUpstream, setLoadingUpstream] = useState(false);
   const [savingUpstream, setSavingUpstream] = useState(false);
+  const [showKey, setShowKey] = useState(false);
 
   const configured = Boolean(config && (config.authDir || config.baseUrl));
 
@@ -212,6 +214,22 @@ export default function GatewayPage() {
   const set = (key: keyof Wb2apiConfig) => (e: ChangeEvent<HTMLInputElement>) =>
     setForm((f) => (f ? { ...f, [key]: e.target.value } : f));
 
+  // 接入信息(cc-switch / OpenAI 兼容客户端)
+  const connBaseUrl = (config?.baseUrl || form?.baseUrl || "").trim().replace(/\/+$/, "");
+  const connApiKey = config?.apiKey || form?.apiKey || "";
+  const connBaseUrlV1 = `${connBaseUrl || "http://127.0.0.1:7863"}/v1`;
+  const maskedKey = connApiKey ? `${connApiKey.slice(0, 4)}••••${connApiKey.slice(-4)}` : "(未配置,填写 apiKey 后生效)";
+  const sampleModels = models.slice(0, 8).map((m) => m.id);
+
+  async function copyText(text: string, label: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(`${label}已复制`);
+    } catch {
+      toast.error("复制失败", { description: "请手动选中复制" });
+    }
+  }
+
   // 扫码新增关闭时回写本地账号库,让「纳管」下拉拿到新账号。
   const prevOauthOpen = useRef(false);
   useEffect(() => {
@@ -236,6 +254,87 @@ export default function GatewayPage() {
           <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} /> 刷新
         </Button>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">接入配置 · WorkBuddy Provider</CardTitle>
+          <CardDescription>
+            把本反代作为 Provider 配到客户端(cc-switch / Codex / OpenAI 兼容工具)所需的关键信息。
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label>Base URL(OpenAI 兼容)</Label>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 truncate rounded-md border bg-muted/40 px-2 py-1.5 font-mono text-xs">
+                  {connBaseUrlV1}
+                </code>
+                <Button size="sm" variant="outline" onClick={() => void copyText(connBaseUrlV1, "Base URL")}>
+                  复制
+                </Button>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>API Key</Label>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 truncate rounded-md border bg-muted/40 px-2 py-1.5 font-mono text-xs">
+                  {showKey ? connApiKey || "(未配置)" : maskedKey}
+                </code>
+                <Button size="sm" variant="outline" onClick={() => setShowKey((s) => !s)}>
+                  {showKey ? "隐藏" : "显示"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void copyText(connApiKey, "API Key")}
+                  disabled={!connApiKey}
+                >
+                  复制
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <Label>模型(带 cn:/global: 前缀)</Label>
+            {sampleModels.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5">
+                {sampleModels.map((id) => (
+                  <Badge key={id} variant="secondary">
+                    {id}
+                  </Badge>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">池有账号后模型列表会自动出现,如 cn:hy3-x。</p>
+            )}
+          </div>
+
+          <Separator />
+
+          <div className="space-y-2 text-sm">
+            <div className="font-medium">在 cc-switch 中添加 WorkBuddy Provider:</div>
+            <ol className="list-inside list-decimal space-y-1 text-muted-foreground">
+              <li>打开 cc-switch,新建 Provider(类型按客户端选:Claude Code 走 Anthropic / Codex、Cherry Studio 等走 OpenAI)</li>
+              <li>
+                Base URL:OpenAI 兼容客户端填 <code>{connBaseUrlV1}</code>;Anthropic 客户端(Claude Code)填{" "}
+                <code>{connBaseUrl || "http://127.0.0.1:7863"}</code>(不带 /v1)
+              </li>
+              <li>API Key 填上方密钥(直连 wb2api 用 apiKey;若走 manager 网关用其签发的 wbk_ 密钥)</li>
+              <li>模型填上方列表中的带前缀模型名(如 cn:hy3-x),可自定义)</li>
+            </ol>
+          </div>
+
+          <Alert>
+            <Server className="size-4" />
+            <AlertDescription>
+              直连 wb2api 用上方信息(base={connBaseUrlV1})。若要用 manager 网关(带密钥分发/配额/模型白名单),改填{" "}
+              <code>http://127.0.0.1:7864/v1</code> + manager 签发的 <code>wbk_…</code> 密钥。
+            </AlertDescription>
+          </Alert>
+        </CardContent>
+      </Card>
 
       {error && (
         <Alert variant="destructive">

@@ -522,7 +522,7 @@ export interface CodeBuddyCnIdeSwitchResult {
 // 网关对接(workbuddy2api,workbuddy-hub 管理面;仅 webui 使用)
 // ---------------------------------------------------------------------------
 
-/** switch 侧对接 workbuddy2api 的配置(`~/.wbh/wb2api.json`)。 */
+/** switch 侧对接 workbuddy2api 的配置(`~/.wb-switch/gateway/wb2api.json`)。 */
 export interface Wb2apiConfig {
   baseUrl: string;
   apiKey: string;
@@ -653,10 +653,10 @@ export interface Wb2apiModelCatalog {
   realm: string;
 }
 
-/** 网关托管配置(`~/.wbh/gateway.json`)。 */
+/** 网关托管配置(`~/.wb-switch/gateway/gateway.json`)。 */
 export interface GatewayConfig {
   enabled: boolean;
-  /** wb2api 二进制路径;空则从 ~/.wbh/gateway/bin 查找。 */
+  /** wb2api 二进制路径;空则从 ~/.wb-switch/gateway/bin 查找。 */
   bin_path: string;
   port: number;
   /** 访问密钥(wbs- 前缀);空 = 不鉴权。 */

@@ -14,10 +14,10 @@ use wb_switch_core::modules::config::atomic_write;
 use wb_switch_core::modules::variant::WbVariant;
 
 use crate::gateway_manage::{gateway_auth_dir, load_gateway_config};
-use crate::wb2api::wbh_dir;
+use crate::wb2api::gateway_root;
 
 fn sync_state_file() -> PathBuf {
-    wbh_dir().join("gateway").join("sync.json")
+    gateway_root().join("sync.json")
 }
 
 /// 单个账号 → wb2api 嵌套凭证(对齐 SaveAtomic);保留既有 `credit` 块。
@@ -86,7 +86,7 @@ fn load_last_fingerprint() -> Option<u64> {
 }
 
 fn save_fingerprint(fp: u64) -> std::io::Result<()> {
-    std::fs::create_dir_all(wbh_dir())?;
+    std::fs::create_dir_all(gateway_root())?;
     let content = serde_json::to_string_pretty(&json!({ "fingerprint": fp })).unwrap_or_default();
     atomic_write(&sync_state_file(), &content)
 }

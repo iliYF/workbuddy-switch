@@ -707,15 +707,6 @@ export const wb2api = {
     wb2apiFetch<{ ok: boolean; uid: string }>("POST", "/api/wb2api/offboard", { uid }),
   getConfig: () =>
     wb2apiFetch<Wb2apiConfig>("GET", "/api/wb2api/config"),
-  saveConfig: (config: Partial<Wb2apiConfig>) =>
-    wb2apiFetch<Wb2apiConfig>("POST", "/api/wb2api/config", { config }),
-  getUpstreamConfig: () =>
-    wb2apiFetch<{ path: string; config: Record<string, unknown> }>(
-      "GET",
-      "/api/wb2api/upstream-config",
-    ),
-  saveUpstreamConfig: (config: Record<string, unknown>) =>
-    wb2apiFetch<{ ok: boolean; path: string }>("POST", "/api/wb2api/upstream-config", { config }),
   // 网关托管
   gatewayStatus: () => wb2apiFetch<GatewayStatus>("GET", "/api/wb2api/gateway"),
   gatewayStart: () => wb2apiFetch<{ ok: boolean; running: boolean }>("POST", "/api/wb2api/gateway/start", {}),

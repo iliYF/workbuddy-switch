@@ -153,15 +153,9 @@ export default function GatewayPage() {
   const [onboarding, setOnboarding] = useState(false);
   const [oauthOpen, setOauthOpen] = useState(false);
 
-  // 配置表单
+  // 对接配置(由网关设置自动派生,只读用于状态判断)
   const [form, setForm] = useState<Wb2apiConfig | null>(null);
-  const [savingConfig, setSavingConfig] = useState(false);
 
-  // 上游 config.json 编辑
-  const [upstreamText, setUpstreamText] = useState("");
-  const [upstreamPath, setUpstreamPath] = useState("");
-  const [loadingUpstream, setLoadingUpstream] = useState(false);
-  const [savingUpstream, setSavingUpstream] = useState(false);
   const [showKey, setShowKey] = useState(false);
   const [connOpen, setConnOpen] = useState(false);
   const [modelQuery, setModelQuery] = useState("");
@@ -251,47 +245,6 @@ export default function GatewayPage() {
       void loadAll();
     } catch (e) {
       toast.error("移除失败", { description: asError(e) });
-    }
-  }
-
-  async function handleSaveConfig() {
-    if (!form) return;
-    setSavingConfig(true);
-    try {
-      const saved = await api.wb2api.saveConfig(form);
-      setConfig(saved);
-      toast.success("对接配置已保存");
-      void loadAll();
-    } catch (e) {
-      toast.error("保存失败", { description: asError(e) });
-    } finally {
-      setSavingConfig(false);
-    }
-  }
-
-  async function handleLoadUpstream() {
-    setLoadingUpstream(true);
-    try {
-      const res = await api.wb2api.getUpstreamConfig();
-      setUpstreamPath(res.path);
-      setUpstreamText(JSON.stringify(res.config, null, 2));
-    } catch (e) {
-      toast.error("读取失败", { description: asError(e) });
-    } finally {
-      setLoadingUpstream(false);
-    }
-  }
-
-  async function handleSaveUpstream() {
-    setSavingUpstream(true);
-    try {
-      const parsed = JSON.parse(upstreamText);
-      await api.wb2api.saveUpstreamConfig(parsed);
-      toast.success("config.json 已保存(已自动备份 .bak)");
-    } catch (e) {
-      toast.error("保存失败", { description: asError(e) });
-    } finally {
-      setSavingUpstream(false);
     }
   }
 
@@ -451,9 +404,6 @@ export default function GatewayPage() {
       })),
     [localAccounts],
   );
-
-  const set = (key: keyof Wb2apiConfig) => (e: ChangeEvent<HTMLInputElement>) =>
-    setForm((f) => (f ? { ...f, [key]: e.target.value } : f));
 
   // 接入信息(cc-switch / OpenAI 兼容客户端)
   const connBaseUrl = (config?.baseUrl || form?.baseUrl || "").trim().replace(/\/+$/, "");
@@ -933,55 +883,6 @@ export default function GatewayPage() {
                   </TableBody>
                 </Table>
               )}
-            </div>
-          </Section>
-          <Section title="对接配置" description="存于 ~/.wbh/wb2api.json(由网关设置自动派生,通常无需手改)">
-            <div className="grid min-w-0 gap-3 px-4 pt-3 pb-4 sm:grid-cols-2 sm:px-5">
-              <div className="space-y-1.5">
-                <Label>baseUrl</Label>
-                <Input value={form?.baseUrl ?? ""} onChange={set("baseUrl")} placeholder="http://127.0.0.1:54321" />
-              </div>
-              <div className="space-y-1.5">
-                <Label>apiKey</Label>
-                <Input value={form?.apiKey ?? ""} onChange={set("apiKey")} placeholder="留空=不鉴权" type="password" />
-              </div>
-              <div className="space-y-1.5">
-                <Label>authDir</Label>
-                <Input value={form?.authDir ?? ""} onChange={set("authDir")} placeholder="wb2api 部署的 auths/ 绝对路径" />
-              </div>
-              <div className="space-y-1.5">
-                <Label>configPath(可选)</Label>
-                <Input value={form?.configPath ?? ""} onChange={set("configPath")} placeholder="wb2api 的 config.json 路径" />
-              </div>
-              <div className="sm:col-span-2">
-                <Button onClick={() => void handleSaveConfig()} disabled={savingConfig || !form}>
-                  {savingConfig ? "保存中…" : "保存对接配置"}
-                </Button>
-              </div>
-            </div>
-          </Section>
-
-          <Section
-            title="上游 config.json"
-            description="直接编辑 wb2api 的 config.json(仅本机可用;保存前自动备份为 .bak,需先配置 configPath)。改 admin/global/cooldown 等需重启 wb2api 生效"
-          >
-            <div className="min-w-0 space-y-3 px-4 pt-3 pb-4 sm:px-5">
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={() => void handleLoadUpstream()} disabled={loadingUpstream}>
-                  {loadingUpstream ? "读取中…" : "读取 config.json"}
-                </Button>
-                {upstreamPath && <span className="text-xs text-muted-foreground">{upstreamPath}</span>}
-              </div>
-              <textarea
-                value={upstreamText}
-                onChange={(e) => setUpstreamText(e.target.value)}
-                spellCheck={false}
-                placeholder="点击「读取 config.json」后在此编辑 JSON…"
-                className="min-h-[240px] w-full rounded-md border bg-muted/40 p-3 font-mono text-xs outline-none focus:ring-2 focus:ring-ring"
-              />
-              <Button onClick={() => void handleSaveUpstream()} disabled={savingUpstream || !upstreamText}>
-                {savingUpstream ? "保存中…" : "保存 config.json"}
-              </Button>
             </div>
           </Section>
         </TabsContent>

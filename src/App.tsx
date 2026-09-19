@@ -158,22 +158,20 @@ function Layout() {
             <Sparkles className="size-4" />
             积分统计
           </NavLink>
-          {api.isWebui() && !demoModeEnabled ? (
-            <NavLink
-              to="/gateway"
-              className={({ isActive }) =>
-                cn(
-                  "flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-sidebar-ring/50",
-                  isActive
-                    ? "bg-foreground/[0.06] font-medium text-foreground"
-                    : "text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground",
-                )
-              }
-            >
-              <Server className="size-4" />
-              网关管理
-            </NavLink>
-          ) : null}
+          <NavLink
+            to="/gateway"
+            className={({ isActive }) =>
+              cn(
+                "flex items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-sidebar-ring/50",
+                isActive
+                  ? "bg-foreground/[0.06] font-medium text-foreground"
+                  : "text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground",
+              )
+            }
+          >
+            <Server className="size-4" />
+            网关管理
+          </NavLink>
           <NavLink
             to="/settings"
             className={({ isActive }) =>

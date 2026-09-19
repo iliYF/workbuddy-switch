@@ -5481,6 +5481,7 @@ dependencies = [
  "tokio",
  "uuid",
  "wb-switch-core",
+ "wb-switch-gateway",
 ]
 
 [[package]]

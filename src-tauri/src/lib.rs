@@ -4,6 +4,7 @@ mod commands;
 mod instance_lock;
 #[cfg(desktop)]
 mod tray;
+mod gateway;
 
 use std::time::Duration;
 use tauri::Emitter;
@@ -228,6 +229,26 @@ pub fn run() {
             commands::relaunch_app,
             commands::get_launch_at_login_enabled,
             commands::set_launch_at_login_enabled,
+            // 网关管理（镜像 webui /api/wb2api/*）
+            gateway::wb2api_status,
+            gateway::wb2api_models,
+            gateway::wb2api_stats,
+            gateway::wb2api_pool_accounts,
+            gateway::wb2api_model_catalog,
+            gateway::wb2api_account_op,
+            gateway::wb2api_onboard,
+            gateway::wb2api_offboard,
+            gateway::wb2api_get_config,
+            gateway::gateway_status,
+            gateway::gateway_start,
+            gateway::gateway_stop,
+            gateway::gateway_save_config,
+            gateway::gateway_sync_now,
+            gateway::gateway_pick_port,
+            gateway::gateway_port_check,
+            gateway::gateway_check_update,
+            gateway::gateway_apply_update,
+            gateway::gateway_gen_key,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

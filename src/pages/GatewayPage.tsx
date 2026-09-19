@@ -333,7 +333,7 @@ export default function GatewayPage() {
     }
   }
 
-  /** 勾选/取消某账号入网关池(持久化到 gateway.json pool_uids)。 */
+  /** 勾选/取消某账号入网关池(持久化到 wbs_gateway.json pool_uids)。 */
   async function togglePoolUid(uid: string) {
     if (!gwForm || !uid) return;
     const cur = gwForm.pool_uids ?? [];

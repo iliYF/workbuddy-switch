@@ -21,8 +21,11 @@ pub fn gateway_root() -> PathBuf {
     home_dir().join(".wb-switch").join("gateway")
 }
 
+/// 本 fork 创建的网关文件/目录统一前缀,避免与其他 fork 共用网关目录时撞名。
+pub const GATEWAY_PREFIX: &str = "wbs_";
+
 pub fn wb2api_config_file() -> PathBuf {
-    gateway_root().join("wb2api.json")
+    gateway_root().join(format!("{GATEWAY_PREFIX}wb2api.json"))
 }
 
 pub fn default_wb2api_config() -> Value {

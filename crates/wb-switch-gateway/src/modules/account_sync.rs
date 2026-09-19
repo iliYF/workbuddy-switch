@@ -17,7 +17,7 @@ use crate::modules::gateway_manage::{gateway_auth_dir, load_gateway_config};
 use crate::modules::wb2api::gateway_root;
 
 fn sync_state_file() -> PathBuf {
-    gateway_root().join("sync.json")
+    gateway_root().join(format!("{}sync.json", crate::modules::wb2api::GATEWAY_PREFIX))
 }
 
 /// 单个账号 → wb2api 嵌套凭证(对齐 SaveAtomic);保留既有 `credit` 块。

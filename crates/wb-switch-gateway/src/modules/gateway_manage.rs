@@ -11,34 +11,35 @@ use std::sync::Mutex;
 
 use wb_switch_core::modules::config::{atomic_write, http_request, http_request_raw};
 
-use crate::modules::wb2api::gateway_root;
+use crate::modules::wb2api::{gateway_root, GATEWAY_PREFIX};
 
 /// 进程句柄:server 进程内单例(与账号库并发写一致,单实例保护由宿主负责)。
 static GATEWAY_PROC: Mutex<Option<Child>> = Mutex::new(None);
 
 // ---------------------------------------------------------------------------
-// 路径与配置三件套(~/.wb-switch/gateway/gateway.json)
+// 路径与配置三件套(~/.wb-switch/gateway/wbs_gateway.json)
 // ---------------------------------------------------------------------------
 
 pub fn gateway_config_file() -> PathBuf {
-    gateway_root().join("gateway.json")
+    gateway_root().join(format!("{GATEWAY_PREFIX}gateway.json"))
 }
 
+/// 网关二进制托管目录(bin 保持无前缀,便于手工放入 wb2api*)。
 pub fn gateway_bin_dir() -> PathBuf {
     gateway_root().join("bin")
 }
 
 pub fn gateway_native_config_file() -> PathBuf {
-    gateway_root().join("gateway_native_config.json")
+    gateway_root().join(format!("{GATEWAY_PREFIX}gateway_native_config.json"))
 }
 
 /// 被托管网关的账号凭证目录(account_sync 推送至此)。
 pub fn gateway_auth_dir() -> PathBuf {
-    gateway_root().join("auths")
+    gateway_root().join(format!("{GATEWAY_PREFIX}auths"))
 }
 
 fn gateway_state_file() -> PathBuf {
-    gateway_root().join("data").join("state.json")
+    gateway_root().join(format!("{GATEWAY_PREFIX}data")).join("state.json")
 }
 
 pub fn default_gateway_config() -> Value {
@@ -145,77 +146,7 @@ fn merge_gateway_config(input: &Value) -> Value {
     merged
 }
 
-/// 一次性迁移:把旧 `~/.wbh/` 下的网关配置搬到新的 `~/.wb-switch/gateway/`。
-///
-/// 仅当新路径尚无 gateway.json、且旧路径存在时执行;搬运 gateway.json、wb2api.json
-/// 与整个 gateway/ 子目录(bin/auths 等)。失败静默(下次读取会走默认)。
-fn migrate_legacy_wbh_dir() {
-    let legacy = wb_switch_core::modules::config::home_dir().join(".wbh");
-    if !legacy.exists() {
-        return;
-    }
-    let new_root = gateway_root();
-    if new_root.join("gateway.json").exists() {
-        return; // 新路径已有配置,不覆盖
-    }
-    let _ = std::fs::create_dir_all(&new_root);
-    // 旧的 gateway.json → 新 gateway/gateway.json
-    if let Ok(text) = std::fs::read_to_string(legacy.join("gateway.json")) {
-        let _ = atomic_write(&new_root.join("gateway.json"), &text);
-    }
-    // 旧的 wb2api.json → 新 wb2api.json;并把其中指向旧根(authDir/configPath)的
-    // 路径改写为新根(`~/.wbh/gateway/X` → `~/.wb-switch/gateway/X`),避免派生
-    // 产物还指向旧目录。
-    if let Ok(text) = std::fs::read_to_string(legacy.join("wb2api.json")) {
-        let mut v = serde_json::from_str::<Value>(&text).unwrap_or_else(|_| json!({}));
-        let old_prefix = legacy.join("gateway").to_string_lossy().to_string();
-        for key in ["authDir", "configPath"] {
-            if let Some(val) = v.get(key).and_then(Value::as_str) {
-                if val.starts_with(&old_prefix) {
-                    let rest = val[old_prefix.len()..].trim_start_matches('/');
-                    v[key] = json!(new_root.join(rest).to_string_lossy());
-                }
-            }
-        }
-        let _ = atomic_write(&new_root.join("wb2api.json"), &serde_json::to_string_pretty(&v).unwrap_or_default());
-    }
-    // 旧的 gateway/ 子目录(bin/auths/native/state 等)整体搬入
-    let legacy_sub = legacy.join("gateway");
-    if legacy_sub.is_dir() {
-        if let Ok(rd) = std::fs::read_dir(&legacy_sub) {
-            for entry in rd.flatten() {
-                let name = entry.file_name();
-                let dest = new_root.join(&name);
-                if dest.exists() {
-                    continue;
-                }
-                let src = entry.path();
-                if src.is_dir() {
-                    let _ = copy_dir_recursive(&src, &dest);
-                } else {
-                    let _ = std::fs::copy(&src, &dest);
-                }
-            }
-        }
-    }
-}
-
-fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(dst)?;
-    for entry in std::fs::read_dir(src)? {
-        let entry = entry?;
-        let to = dst.join(entry.file_name());
-        if entry.file_type()?.is_dir() {
-            copy_dir_recursive(&entry.path(), &to)?;
-        } else {
-            std::fs::copy(entry.path(), &to)?;
-        }
-    }
-    Ok(())
-}
-
 pub fn load_gateway_config() -> Value {
-    migrate_legacy_wbh_dir();
     let f = gateway_config_file();
     if f.exists() {
         if let Ok(text) = std::fs::read_to_string(&f) {
@@ -247,7 +178,7 @@ pub fn load_gateway_config() -> Value {
 /// 保存托管配置,并从端口/密钥派生出 wb2api 对接配置(baseUrl/apiKey/authDir)。
 ///
 /// 网关页只让用户填一次(端口 + API Key);hub 连网关所需的对接信息由这里自动
-/// 写入 `~/.wb-switch/gateway/wb2api.json`,避免两处重复填写。
+/// 写入 `~/.wb-switch/gateway/wbs_wb2api.json`,避免两处重复填写。
 pub fn save_gateway_config(cfg: &Value) -> std::io::Result<()> {
     let merged = merge_gateway_config(cfg);
     std::fs::create_dir_all(gateway_root())?;
@@ -328,7 +259,7 @@ pub fn pick_free_port(from: u16) -> u16 {
 // 配置生成 / 进程托管
 // ---------------------------------------------------------------------------
 
-/// 把 gateway.json 转成 wb2api 原生配置(listen/api_key/auth_dir/state_file/admin/global)。
+/// 把 wbs_gateway.json 转成 wb2api 原生配置(listen/api_key/auth_dir/state_file/admin/global)。
 fn write_native_config() -> Result<PathBuf, String> {
     let port = cfg_port();
     let cfg = json!({

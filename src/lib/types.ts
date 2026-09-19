@@ -522,7 +522,7 @@ export interface CodeBuddyCnIdeSwitchResult {
 // 网关对接(workbuddy2api,workbuddy-hub 管理面;仅 webui 使用)
 // ---------------------------------------------------------------------------
 
-/** switch 侧对接 workbuddy2api 的配置(`~/.wb-switch/gateway/wb2api.json`)。 */
+/** switch 侧对接 workbuddy2api 的配置(`~/.wb-switch/gateway/wbs_wb2api.json`)。 */
 export interface WB2APIConfig {
   baseUrl: string;
   apiKey: string;
@@ -661,7 +661,7 @@ export interface GatewayArtifact {
   assets?: Record<string, string>;
 }
 
-/** 网关托管配置(`~/.wb-switch/gateway/gateway.json`)。 */
+/** 网关托管配置(`~/.wb-switch/gateway/wbs_gateway.json`)。 */
 export interface GatewayConfig {
   enabled: boolean;
   /** wb2api 二进制路径;空则从 ~/.wb-switch/gateway/bin 查找。 */

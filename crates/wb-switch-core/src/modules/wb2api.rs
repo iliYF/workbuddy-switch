@@ -1,6 +1,6 @@
 //! wb2api 网关对接(workbuddy-hub Phase 1 管理面)。
 //!
-//! 对 workbuddy2api 的 HTTP 客户端 + 同机 auths/config 文件访问。复用 switch 既有的
+//! 对 workbuddy2api 的 HTTP 客户端 + 同机 auths/config 文件访问。复用 hub 既有的
 //! 账号库 / OAuth / 签到 / 积分,本模块只做「推账号入池 + 拉池状态 + 运维」。
 //! 新增 hub 配置统一放 `~/.wbh`(既有 `~/.wb-switch` 零回归)。
 

@@ -390,7 +390,7 @@ export default function GatewayPage() {
                 <CardHeader>
                   <CardTitle className="text-base">纳管账号</CardTitle>
                   <CardDescription>
-                    把 switch 本地账号库的账号推入网关池(write 到 auths 目录,5s 热加载)。
+                    把本地账号库的账号推入网关池(写入 auths 目录,5s 热加载)。
                     与桌面切换共用同一批腾讯账号。
                   </CardDescription>
                 </CardHeader>

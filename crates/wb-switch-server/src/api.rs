@@ -147,6 +147,7 @@ pub fn router() -> Router {
         .route("/api/wb2api/models", get(api_wb2api_models))
         .route("/api/wb2api/stats", get(api_wb2api_stats))
         .route("/api/wb2api/pool-accounts", get(api_wb2api_pool_accounts))
+        .route("/api/wb2api/model-catalog", get(api_wb2api_model_catalog))
         .route(
             "/api/wb2api/accounts/:uid/disable",
             post(api_wb2api_account_disable),
@@ -845,6 +846,20 @@ async fn api_wb2api_stats() -> Response {
 
 async fn api_wb2api_pool_accounts() -> Response {
     json_ok(wb2api::pool_accounts().await)
+}
+
+/// 模型中心:指定版本的模型目录(realm 缺省 cn;直连腾讯,失败回退上游)。
+async fn api_wb2api_model_catalog(RawQuery(query): RawQuery) -> Response {
+    let realm = query
+        .as_deref()
+        .and_then(|q| {
+            q.split('&').find_map(|p| {
+                let (k, v) = p.split_once('=').unwrap_or((p, ""));
+                (k == "realm").then_some(v)
+            })
+        })
+        .unwrap_or("cn");
+    json_ok(wb2api::model_catalog(WbVariant::parse(Some(realm))).await)
 }
 
 async fn api_wb2api_account_disable(Path(uid): Path<String>, Json(body): Json<Value>) -> Response {

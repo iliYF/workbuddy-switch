@@ -637,7 +637,20 @@ export interface Wb2apiModel {
   reasoning_summary?: string;
   reasoning_supported_efforts?: string[];
   reasoning_default_effort?: string;
+  /** 系列归属(前端也可自行推导);来自模型中心。 */
+  series?: string;
   [key: string]: unknown;
+}
+
+/** 模型中心返回:模型目录 + 来源元信息(直连腾讯,失败回退上游)。 */
+export interface Wb2apiModelCatalog {
+  models: Wb2apiModel[];
+  /** tencent | upstream */
+  source: string;
+  source_label: string;
+  via?: string;
+  errors?: string[];
+  realm: string;
 }
 
 /** admin 端点响应体。 */

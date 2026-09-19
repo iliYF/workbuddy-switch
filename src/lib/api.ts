@@ -34,6 +34,7 @@ import type {
   Wb2apiAdminState,
   Wb2apiConfig,
   Wb2apiModel,
+  Wb2apiModelCatalog,
   Wb2apiPoolAccounts,
   Wb2apiPoolSummary,
   Wb2apiStats,
@@ -678,6 +679,12 @@ export const wb2api = {
     wb2apiFetch<Wb2apiPoolSummary>("GET", "/api/wb2api/status"),
   models: () =>
     wb2apiFetch<{ object: string; data: Wb2apiModel[] }>("GET", "/api/wb2api/models"),
+  /** 模型中心:直连腾讯拉真实可用模型(失败回退上游);realm 缺省 cn。 */
+  modelCatalog: (realm?: WbVariant) =>
+    wb2apiFetch<Wb2apiModelCatalog>(
+      "GET",
+      `/api/wb2api/model-catalog${realm === "ai" ? "?realm=global" : ""}`,
+    ),
   stats: () =>
     wb2apiFetch<Wb2apiStats>("GET", "/api/wb2api/stats"),
   poolAccounts: () =>

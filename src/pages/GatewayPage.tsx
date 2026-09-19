@@ -92,6 +92,7 @@ export default function GatewayPage() {
   const [showKey, setShowKey] = useState(false);
   const [connOpen, setConnOpen] = useState(false);
   const [modelQuery, setModelQuery] = useState("");
+  const [catalogSource, setCatalogSource] = useState("");
 
   const configured = Boolean(config && (config.authDir || config.baseUrl));
 
@@ -103,16 +104,17 @@ export default function GatewayPage() {
       setConfig(cfg);
       setForm(cfg);
       if (cfg.authDir || cfg.baseUrl) {
-        const [p, summaryRes, statsRes, modelsRes] = await Promise.all([
+        const [p, summaryRes, statsRes, catalogRes] = await Promise.all([
           api.wb2api.poolAccounts(),
           api.wb2api.status().catch(() => null),
           api.wb2api.stats().catch(() => null),
-          api.wb2api.models().catch(() => null),
+          api.wb2api.modelCatalog().catch(() => null),
         ]);
         setPool(p);
         setSummary(summaryRes);
         setStats(statsRes);
-        setModels(modelsRes?.data ?? []);
+        setModels(catalogRes?.models ?? []);
+        setCatalogSource(catalogRes?.source_label ?? "上游");
       }
     } catch (e) {
       setError(asError(e));
@@ -561,7 +563,8 @@ export default function GatewayPage() {
                   <CardTitle className="text-base">模型中心</CardTitle>
                   <CardDescription>
                     共 {modelSummary.total} 个 · 推理 {modelSummary.reasoning} · 大上下文(≥128K){" "}
-                    {modelSummary.large} · 最大上下文 {modelSummary.maxCtx.toLocaleString()}
+                    {modelSummary.large} · 最大上下文 {modelSummary.maxCtx.toLocaleString()} · 来源{" "}
+                    {catalogSource}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">

@@ -380,6 +380,365 @@ pub fn upstream_config_save(config: &Value) -> Result<Value, String> {
     Ok(json!({ "ok": true, "path": path }))
 }
 
+// ---------------------------------------------------------------------------
+// 模型目录(model_catalog):直连腾讯模型接口拉取真实可用的模型清单
+// ---------------------------------------------------------------------------
+
+const V3_CONFIG_PATH: &str = "/v3/config";
+
+/// 出站 CLI UA(镜像上游 defaultWorkBuddyUAFor)。
+/// 模型目录接口有 UA 门禁:只有三段式 CLI UA 能过,/v3/config 对 web UA 直接 400。
+fn cli_user_agent(realm: WbVariant) -> String {
+    let platform = match realm {
+        WbVariant::Ai => "WorkBuddy AI",
+        WbVariant::Cn => "WorkBuddy",
+    };
+    format!("WorkBuddy/5.5.4 {platform}/5.5.4 CLI/2.137.1")
+}
+
+fn tencent_origin(realm: WbVariant) -> &'static str {
+    match realm {
+        WbVariant::Ai => "https://www.workbuddy.ai",
+        WbVariant::Cn => "https://www.codebuddy.cn",
+    }
+}
+
+fn tencent_model_headers(realm: WbVariant, token: &str, domain: &str) -> HashMap<String, String> {
+    let origin = tencent_origin(realm);
+    let mut h = HashMap::new();
+    h.insert("Authorization".to_string(), format!("Bearer {token}"));
+    h.insert("User-Agent".to_string(), cli_user_agent(realm));
+    h.insert("Origin".to_string(), origin.to_string());
+    h.insert("Referer".to_string(), format!("{origin}/"));
+    if !domain.trim().is_empty() {
+        h.insert("X-Domain".to_string(), domain.to_string());
+    }
+    h
+}
+
+async fn tencent_model_get(base: &str, path: &str, headers: &HashMap<String, String>) -> Result<Value, String> {
+    let resp = http_request(&format!("{base}{path}"), "GET", None, Some(headers)).await;
+    if resp.get("code").and_then(Value::as_i64) == Some(-1) {
+        return Err(resp.get("message").and_then(Value::as_str).unwrap_or("请求失败").to_string());
+    }
+    Ok(resp)
+}
+
+/// 是否非对话模型(应从可选列表剔除):镜像上游 nonChatModel。
+fn non_chat_model(mid: &str, max_output_tokens: i64, tags: &[String]) -> bool {
+    let low = mid.to_lowercase();
+    if low.starts_with("nes-") || low.starts_with("completion-") || low.starts_with("codewise-") {
+        return true;
+    }
+    if max_output_tokens > 0 && max_output_tokens <= 256 {
+        return true;
+    }
+    tags.iter().any(|t| t == "text-to-image")
+}
+
+/// 按 id 前缀推导系列名;认不出归「其他」(与 manager modelcatalog 同口径)。
+fn series_of(model_id: &str) -> String {
+    let mid = model_id.to_lowercase();
+    const RULES: &[(&[&str], &str)] = &[
+        (&["glm"], "智谱 GLM"),
+        (&["deepseek"], "DeepSeek"),
+        (&["kimi", "moonshot"], "Kimi"),
+        (&["minimax"], "MiniMax"),
+        (&["hy", "hunyuan"], "腾讯混元"),
+        (&["auto"], "自动选择"),
+    ];
+    for (prefixes, label) in RULES {
+        if prefixes.iter().any(|p| mid.starts_with(p)) {
+            return label.to_string();
+        }
+    }
+    "其他".to_string()
+}
+
+/// 解析一路模型响应(对象列表或窄表字符串数组),返回「id → 条目」与输出顺序。
+/// 国内版企业端点按 agents 的 cli 白名单过滤;国际版与 /v3 全量。
+fn parse_model_payload(data: &Value, realm: WbVariant) -> (HashMap<String, Value>, Vec<String>) {
+    let mut items: HashMap<String, Value> = HashMap::new();
+    let mut order: Vec<String> = Vec::new();
+
+    if let Some(list) = data.as_array() {
+        for raw in list {
+            if let Some(mid) = raw.as_str() {
+                let mid = mid.trim().to_string();
+                if !mid.is_empty() && !items.contains_key(&mid) {
+                    items.insert(mid.clone(), json!({ "id": mid }));
+                    order.push(mid);
+                }
+            }
+        }
+        return (items, order);
+    }
+
+    let raw_models = data.get("models").and_then(Value::as_array).cloned().unwrap_or_default();
+    let agents = data.get("agents").and_then(Value::as_array).cloned().unwrap_or_default();
+
+    let mut cli_ids: Vec<String> = Vec::new();
+    if realm == WbVariant::Cn {
+        for ag in &agents {
+            if ag.get("name").and_then(Value::as_str) == Some("cli") {
+                if let Some(ids) = ag.get("models").and_then(Value::as_array) {
+                    cli_ids = ids.iter().filter_map(|x| x.as_str().map(str::to_string)).collect();
+                }
+                break;
+            }
+        }
+    }
+
+    let mut info: HashMap<String, Value> = HashMap::new();
+    for m in raw_models {
+        let Some(mid) = m.get("id").and_then(Value::as_str) else { continue };
+        let mid = mid.trim().to_string();
+        if mid.is_empty() {
+            continue;
+        }
+        let reasoning = m.get("reasoning").filter(|v| v.is_object()).cloned().unwrap_or_else(|| json!({}));
+        let efforts: Vec<String> = reasoning
+            .get("supportedEfforts")
+            .and_then(Value::as_array)
+            .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
+            .unwrap_or_default();
+        let tags: Vec<String> = m.get("tags")
+            .and_then(Value::as_array)
+            .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
+            .unwrap_or_default();
+        let max_out = m.get("maxOutputTokens").and_then(Value::as_i64).unwrap_or(0);
+        let non_chat = realm == WbVariant::Cn && non_chat_model(&mid, max_out, &tags);
+        info.insert(
+            mid.clone(),
+            json!({
+                "id": mid,
+                "name": m.get("name").and_then(Value::as_str).unwrap_or("").trim().to_string(),
+                "context_length": m.get("maxInputTokens").and_then(Value::as_i64).unwrap_or(0),
+                "max_output_tokens": max_out,
+                "disabled": m.get("disabled").and_then(Value::as_bool).unwrap_or(false),
+                "efforts": efforts,
+                "default_effort": reasoning.get("defaultEffort").and_then(Value::as_str).unwrap_or("").trim().to_string(),
+                "supports_images": m.get("supportsImages").and_then(Value::as_bool).unwrap_or(false),
+                "description": m.get("descriptionZh").and_then(Value::as_str).unwrap_or("").trim().to_string(),
+                "credits": m.get("credits").and_then(Value::as_str).unwrap_or("").trim().to_string(),
+                "vendor": m.get("vendor").and_then(Value::as_str).unwrap_or("").trim().to_string(),
+                "tags": tags,
+                "is_default": m.get("isDefault").and_then(Value::as_bool).unwrap_or(false),
+                "supports_reasoning": m.get("supportsReasoning").and_then(Value::as_bool).unwrap_or(false),
+                "supports_tool_call": m.get("supportsToolCall").and_then(Value::as_bool).unwrap_or(false),
+                "only_reasoning": m.get("onlyReasoning").and_then(Value::as_bool).unwrap_or(false),
+                "reasoning_summary": reasoning.get("summary").and_then(Value::as_str).unwrap_or("").trim().to_string(),
+                "_non_chat": non_chat,
+            }),
+        );
+    }
+
+    let ids: Vec<String> = if cli_ids.is_empty() {
+        info.keys().cloned().collect()
+    } else {
+        cli_ids
+    };
+    for mid in ids {
+        let Some(item) = info.get(&mid) else { continue };
+        if item.get("disabled").and_then(Value::as_bool).unwrap_or(false) {
+            continue;
+        }
+        if item.get("_non_chat").and_then(Value::as_bool).unwrap_or(false) {
+            continue;
+        }
+        let mut entry = item.clone();
+        if let Some(obj) = entry.as_object_mut() {
+            obj.remove("_non_chat");
+        }
+        items.insert(mid.clone(), entry);
+        order.push(mid);
+    }
+    (items, order)
+}
+
+/// 规范化模型条目:补系列,校验默认推理档位。
+fn decorate_models(items: HashMap<String, Value>, order: Vec<String>) -> Vec<Value> {
+    order
+        .iter()
+        .filter_map(|mid| items.get(mid).cloned())
+        .map(|mut out| {
+            let mid = out.get("id").and_then(Value::as_str).unwrap_or("").to_string();
+            out["series"] = json!(series_of(&mid));
+            let efforts: Vec<String> = out
+                .get("efforts")
+                .and_then(Value::as_array)
+                .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
+                .unwrap_or_default();
+            let def = out.get("default_effort").and_then(Value::as_str).unwrap_or("").to_string();
+            if !def.is_empty() && !efforts.contains(&def) {
+                out["default_effort"] = json!("");
+            }
+            out
+        })
+        .collect()
+}
+
+/// 从 auths 挑一个指定版本、且有 accessToken 的账号。
+async fn pick_account(realm: WbVariant) -> Option<Value> {
+    let payload = pool_accounts().await;
+    let accounts = payload.get("accounts")?.as_array()?;
+    accounts.iter().find(|a| {
+        let r = a.get("realm").and_then(Value::as_str).unwrap_or("cn");
+        let realm_ok = (realm == WbVariant::Ai) == (r == "global");
+        realm_ok
+            && a.get("accessToken")
+                .and_then(Value::as_str)
+                .map(|s| !s.trim().is_empty())
+                .unwrap_or(false)
+    }).cloned()
+}
+
+/// 并发取企业端点(候选路径第一个成功)与 /v3/config,合并后过滤、装饰。
+async fn fetch_tencent_catalog(realm: WbVariant, token: &str, domain: &str) -> Result<Vec<Value>, String> {
+    let base = tencent_origin(realm);
+    let headers = tencent_model_headers(realm, token, domain);
+    let ent_paths: &[&str] = match realm {
+        WbVariant::Ai => &["/v2/enterprises/personal/models", "/console/enterprises/personal/models"],
+        WbVariant::Cn => &["/console/enterprises/personal/models"],
+    };
+
+    async fn probe(base: &str, paths: &[&str], headers: &HashMap<String, String>) -> Result<Value, String> {
+        let mut last = String::new();
+        for p in paths {
+            match tencent_model_get(base, p, headers).await {
+                Ok(resp) if resp.get("code").and_then(Value::as_i64).unwrap_or(-1) == 0 => {
+                    return Ok(resp.get("data").cloned().unwrap_or(Value::Null));
+                }
+                Ok(resp) => {
+                    last = format!("code={}", resp.get("code").and_then(Value::as_i64).unwrap_or(-1));
+                }
+                Err(e) => last = e,
+            }
+        }
+        Err(if last.is_empty() { "全部路径失败".to_string() } else { last })
+    }
+
+    let ent_fut = probe(base, ent_paths, &headers);
+    let v3_fut = probe(base, &[V3_CONFIG_PATH], &headers);
+    let (ent_res, v3_res) = tokio::join!(ent_fut, v3_fut);
+
+    let (mut items, mut order) = (HashMap::new(), Vec::new());
+    let mut errors: Vec<String> = Vec::new();
+    for res in [&v3_res, &ent_res] {
+        match res {
+            Ok(data) => {
+                let (it, od) = parse_model_payload(data, realm);
+                for mid in od {
+                    if items.contains_key(&mid) {
+                        continue;
+                    }
+                    if let Some(v) = it.get(&mid) {
+                        items.insert(mid.clone(), v.clone());
+                    }
+                    order.push(mid);
+                }
+            }
+            Err(e) => errors.push(e.clone()),
+        }
+    }
+    if items.is_empty() {
+        return Err(if errors.is_empty() {
+            "模型接口未返回可用模型".to_string()
+        } else {
+            errors.join("; ")
+        });
+    }
+    Ok(decorate_models(items, order))
+}
+
+/// 把上游 /v1/models 的字段名映射成内部统一形状。
+fn map_upstream_model_fields(m: &mut Value) {
+    for key in ["reasoning_supported_efforts", "reasoning_default_effort", "reasoning_summary"] {
+        if let Some(v) = m.get(key).cloned() {
+            m[if key == "reasoning_supported_efforts" {
+                "efforts"
+            } else {
+                key
+            }] = v;
+        }
+    }
+}
+
+/// 腾讯模型接口失败时的回退:用上游 /v1/models(字段少,至少保证页面有内容)。
+async fn fallback_upstream_models(realm: WbVariant, errors: &mut Vec<String>) -> Value {
+    let resp = api_request("/v1/models", "GET", None).await;
+    let items = match resp {
+        Ok(v) => v.get("data").and_then(Value::as_array).cloned().unwrap_or_default(),
+        Err(e) => {
+            errors.push(e);
+            vec![]
+        }
+    };
+    let models: Vec<Value> = items
+        .into_iter()
+        .filter(|m| {
+            let id = m.get("id").and_then(Value::as_str).unwrap_or("").to_lowercase();
+            match realm {
+                WbVariant::Ai => id.starts_with("global:"),
+                WbVariant::Cn => !id.starts_with("global:"),
+            }
+        })
+        .map(|mut m| {
+            let id = m.get("id").and_then(Value::as_str).unwrap_or("").to_string();
+            let bare = id.split(':').last().unwrap_or(&id).to_string();
+            m["id"] = json!(bare);
+            map_upstream_model_fields(&mut m);
+            m
+        })
+        .filter(|m| m.get("id").and_then(Value::as_str).map(|s| !s.is_empty()).unwrap_or(false))
+        .map(|mut m| {
+            let mid = m.get("id").and_then(Value::as_str).unwrap_or("").to_string();
+            m["series"] = json!(series_of(&mid));
+            m
+        })
+        .collect();
+    json!({
+        "models": models,
+        "source": "upstream",
+        "source_label": "上游 /v1/models(无显示名;推理档位取上游透出值)",
+        "via": "workbuddy2api",
+        "errors": errors,
+        "realm": realm.as_str(),
+    })
+}
+
+/// 模型中心:返回指定版本的模型目录。优先直连腾讯接口(真实可用 + 显示名/推理档位),
+/// 失败回退上游 /v1/models。数据源现在是腾讯,但能力是「模型目录」,命名保持中性。
+pub async fn model_catalog(realm: WbVariant) -> Value {
+    let mut errors: Vec<String> = Vec::new();
+    if let Some(acct) = pick_account(realm).await {
+        let token = acct.get("accessToken").and_then(Value::as_str).unwrap_or("");
+        let domain = acct.get("domain").and_then(Value::as_str).unwrap_or("");
+        let nickname = acct.get("nickname").and_then(Value::as_str).unwrap_or("");
+        if !token.is_empty() {
+            match fetch_tencent_catalog(realm, token, domain).await {
+                Ok(models) if !models.is_empty() => {
+                    return json!({
+                        "models": models,
+                        "source": "tencent",
+                        "source_label": "腾讯模型接口(含显示名与推理档位)",
+                        "via": nickname,
+                        "errors": errors,
+                        "realm": realm.as_str(),
+                    });
+                }
+                Ok(_) => errors.push("腾讯接口未返回可用模型".to_string()),
+                Err(e) => errors.push(e),
+            }
+        } else {
+            errors.push("账号缺少 accessToken".to_string());
+        }
+    } else {
+        errors.push("没有可用账号".to_string());
+    }
+    fallback_upstream_models(realm, &mut errors).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -447,5 +806,94 @@ mod tests {
         assert!(wb2api_config_file().starts_with(wbh_dir()));
         assert!(wbh_dir().ends_with(".wbh"));
         assert_ne!(wbh_dir(), crate::modules::config::store_dir(), "hub 新数据根与既有 ~/.wb-switch 分离");
+    }
+
+    #[test]
+    fn series_of_classifies_by_id_prefix() {
+        assert_eq!(series_of("glm-5.2"), "智谱 GLM");
+        assert_eq!(series_of("deepseek-v4.1-flash"), "DeepSeek");
+        assert_eq!(series_of("kimi-k3-1"), "Kimi");
+        assert_eq!(series_of("minimax-m3"), "MiniMax");
+        assert_eq!(series_of("hy3-x"), "腾讯混元");
+        assert_eq!(series_of("hunyuan-chat"), "腾讯混元");
+        assert_eq!(series_of("auto"), "自动选择");
+        assert_eq!(series_of("unknown-model"), "其他");
+    }
+
+    #[test]
+    fn non_chat_model_filters_specialized_and_tiny_and_image_models() {
+        assert!(non_chat_model("nes-embed", 4096, &[]));
+        assert!(non_chat_model("completion-x", 4096, &[]));
+        assert!(non_chat_model("codewise-x", 4096, &[]));
+        assert!(non_chat_model("tiny", 256, &[]));
+        assert!(!non_chat_model("tiny", 0, &[]), "0 视为未声明,不过滤");
+        assert!(!non_chat_model("glm-5.2", 4096, &[]));
+        assert!(non_chat_model("img", 4096, &["text-to-image".to_string()]));
+    }
+
+    #[test]
+    fn parse_model_payload_applies_cli_whitelist_and_skips_disabled_non_chat() {
+        // 国内版:agents 的 cli 白名单只放行 glm-5.2 / deepseek-v4.1-flash;
+        // disabled 与 non_chat 模型被剔除。
+        let data = json!({
+            "agents": [{"name": "cli", "models": ["glm-5.2", "deepseek-v4.1-flash", "tiny"]}],
+            "models": [
+                {"id": "glm-5.2", "name": "GLM", "maxInputTokens": 131072, "maxOutputTokens": 8192},
+                {"id": "deepseek-v4.1-flash", "name": "DeepSeek", "maxInputTokens": 131072, "maxOutputTokens": 8192, "disabled": true},
+                {"id": "tiny", "name": "Tiny", "maxInputTokens": 131072, "maxOutputTokens": 256},
+                {"id": "outside", "name": "Out", "maxInputTokens": 131072, "maxOutputTokens": 8192},
+            ],
+        });
+        let (items, order) = parse_model_payload(&data, WbVariant::Cn);
+        let ids = order.clone();
+        assert_eq!(ids, vec!["glm-5.2"], "cli 白名单 + 剔 disabled + 剔 tiny 非对话");
+        assert!(items.contains_key("glm-5.2"));
+        assert_eq!(items["glm-5.2"]["name"], "GLM");
+        assert_eq!(items["glm-5.2"]["context_length"], 131072);
+        assert!(items["glm-5.2"].get("_non_chat").is_none(), "内部标记不得外泄");
+    }
+
+    #[test]
+    fn parse_model_payload_reads_narrow_table_and_reasoning() {
+        let data = json!(["glm-5.2", "deepseek-v4.1-flash"]);
+        let (items, order) = parse_model_payload(&data, WbVariant::Ai);
+        assert_eq!(order.len(), 2);
+        assert_eq!(items["deepseek-v4.1-flash"]["id"], "deepseek-v4.1-flash");
+
+        let full = json!({
+            "models": [{
+                "id": "hy3-x",
+                "name": "混元",
+                "maxInputTokens": 1000000,
+                "maxOutputTokens": 32000,
+                "reasoning": {"supportedEfforts": ["low", "high"], "defaultEffort": "high", "summary": "auto"},
+                "supportsImages": true,
+                "descriptionZh": "推理增强",
+                "credits": "x0.05",
+                "tags": ["craft"]
+            }]
+        });
+        let (items, _) = parse_model_payload(&full, WbVariant::Cn);
+        let m = &items["hy3-x"];
+        assert_eq!(m["efforts"], json!(["low", "high"]));
+        assert_eq!(m["default_effort"], "high");
+        assert_eq!(m["supports_images"], true);
+        assert_eq!(m["description"], "推理增强");
+        assert_eq!(m["credits"], "x0.05");
+    }
+
+    #[test]
+    fn decorate_adds_series_and_validates_default_effort() {
+        let mut items = HashMap::new();
+        let mut order = vec![];
+        for (id, def) in [("glm-5.2", "xhigh"), ("auto", "")] {
+            items.insert(id.to_string(), json!({"id": id, "efforts": ["low", "high"], "default_effort": def}));
+            order.push(id.to_string());
+        }
+        let decorated = decorate_models(items, order);
+        assert_eq!(decorated[0]["series"], "智谱 GLM");
+        // xhigh 不在 [low,high] 内 → 清空;auto 无默认 → 保持空
+        assert_eq!(decorated[0]["default_effort"], "");
+        assert_eq!(decorated[1]["series"], "自动选择");
     }
 }

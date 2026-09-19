@@ -147,6 +147,7 @@ export default function GatewayPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState("gateway");
+  const [gwSubTab, setGwSubTab] = useState("status");
 
   // 纳管
   const [selectedAccountId, setSelectedAccountId] = useState("");
@@ -309,41 +310,6 @@ export default function GatewayPage() {
       setGwBusy(false);
     }
   }
-
-  const [gwUpdateMsg, setGwUpdateMsg] = useState("");
-  const [gwUpdating, setGwUpdating] = useState(false);
-
-  async function handleGwCheckUpdate() {
-    setGwUpdating(true);
-    try {
-      const r = await api.wb2api.gatewayCheckUpdate();
-      setGwUpdateMsg(
-        r.available ? `更新可用: ${r.path || r.url || ""}${r.size ? ` (${r.size} 字节)` : ""}` : `无可用更新: ${r.message ?? ""}`,
-      );
-    } catch (e) {
-      setGwUpdateMsg(asError(e));
-    } finally {
-      setGwUpdating(false);
-    }
-  }
-
-  async function handleGwApplyUpdate() {
-    setGwUpdating(true);
-    try {
-      const r = await api.wb2api.gatewayApplyUpdate();
-      setGwUpdateMsg(
-        r.ok
-          ? `已更新 ${r.bin}(${r.size} 字节)${r.restarted ? ",网关已重启" : ""}${r.restart_error ? `,重启失败: ${r.restart_error}` : ""}`
-          : "更新失败",
-      );
-      await refreshGw();
-    } catch (e) {
-      setGwUpdateMsg(`更新失败: ${asError(e)}`);
-    } finally {
-      setGwUpdating(false);
-    }
-  }
-
   async function handleGwPickPort() {
     try {
       const r = await api.wb2api.gatewayPickPort();
@@ -604,165 +570,9 @@ export default function GatewayPage() {
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="gateway">网关</TabsTrigger>
-          <TabsTrigger value="pool">账号池</TabsTrigger>
           <TabsTrigger value="models">模型</TabsTrigger>
           <TabsTrigger value="usage">用量</TabsTrigger>
         </TabsList>
-
-        <TabsContent value="pool" className="space-y-6">
-          {configured ? (
-            <>
-              <Section
-                title="池内账号"
-                description={
-                  pool?.configured
-                    ? `${pool.accounts.length} 个账号在网关池中;状态来自 /status`
-                    : "未配置 authDir,仅显示池状态"
-                }
-              >
-                <div className="min-w-0 px-4 pt-3 pb-4 sm:px-5">
-                  {loading && !pool ? (
-                    <Skeleton className="h-24 w-full" />
-                  ) : pool && pool.accounts.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">池内暂无账号,请在下方添加。</p>
-                  ) : (
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>昵称</TableHead>
-                          <TableHead>UID</TableHead>
-                          <TableHead>域</TableHead>
-                          <TableHead>积分</TableHead>
-                          <TableHead>状态</TableHead>
-                          <TableHead className="text-right">操作</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {(pool?.accounts ?? []).map((acc) => (
-                          <TableRow key={acc.uid}>
-                            <TableCell className="font-medium">{acc.nickname || acc.uid}</TableCell>
-                            <TableCell className="font-mono text-xs">{acc.uid.slice(0, 8)}</TableCell>
-                            <TableCell className="text-xs">{acc.realm || "cn"}</TableCell>
-                            <TableCell className="tabular-nums">{acc.pool ? acc.pool.credits : "—"}</TableCell>
-                            <TableCell>
-                              <StatusBadge state={acc.pool} />
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <div className="flex justify-end gap-1.5">
-                                {acc.pool?.manual_disabled ? (
-                                  <Button size="sm" variant="outline" onClick={() => void handleAccountOp(acc.uid, "enable")}>
-                                    启用
-                                  </Button>
-                                ) : (
-                                  <Button size="sm" variant="outline" onClick={() => void handleAccountOp(acc.uid, "disable")}>
-                                    停用
-                                  </Button>
-                                )}
-                                {acc.pool?.disabled && (
-                                  <Button size="sm" variant="secondary" onClick={() => void handleAccountOp(acc.uid, "revive")}>
-                                    复活
-                                  </Button>
-                                )}
-                                <Button size="sm" variant="ghost" onClick={() => void handleOffboard(acc.uid)}>
-                                  <Trash2 className="size-4" />
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  )}
-                </div>
-              </Section>
-
-              <Section title="添加账号入池" description="选择本地账号库中的账号入池;也可扫码新增账号">
-                <div className="flex flex-wrap items-end gap-3 px-4 py-3 sm:px-5">
-                  <div className="min-w-[220px] flex-1 space-y-1.5">
-                    <Label>选择本地账号</Label>
-                    <Select value={selectedAccountId} onValueChange={setSelectedAccountId}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="选择要入池的账号" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {onboardOptions.length === 0 && (
-                          <div className="px-2 py-1.5 text-sm text-muted-foreground">本地账号库为空,请先扫码添加</div>
-                        )}
-                        {onboardOptions.map((opt) => (
-                          <SelectItem key={opt.id} value={opt.id}>
-                            {opt.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <Button onClick={() => void handleOnboard()} disabled={!selectedAccountId || onboarding}>
-                    <Plug className="size-4" /> {onboarding ? "入池中…" : "添加进池"}
-                  </Button>
-                  <Button variant="outline" onClick={() => setOauthOpen(true)}>
-                    <ArrowLeftRight className="size-4" /> 扫码新增账号
-                  </Button>
-                </div>
-              </Section>
-
-              <Section title="入池策略" description="手动勾选入池、自动入池与永不入池名单">
-                <Row>
-                  <div className="min-w-0">
-                    <div className="text-[13px]">自动入池</div>
-                    <div className="mt-0.5 text-[11px] text-muted-foreground">
-                      开启后本地账号库的账号自动进入网关池(仍受下方「永不入池」约束)
-                    </div>
-                  </div>
-                  <Switch
-                    checked={gwForm?.sync_enabled ?? false}
-                    onCheckedChange={(v) => setGwForm((f) => (f ? { ...f, sync_enabled: v } : f))}
-                  />
-                </Row>
-                <div className="min-w-0 space-y-3 px-4 pt-3 pb-4 sm:px-5">
-                  <div className="text-[13px]">
-                    账号入池与永不入池
-                    <span className="ml-2 text-[11px] font-normal text-muted-foreground">
-                      左侧开关「入池选择」,右侧开关「永不入池」(优先)
-                    </span>
-                  </div>
-                  {localAccounts.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">本地账号库为空,请先扫码添加</p>
-                  ) : (
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      {localAccounts.map((acc) => {
-                        const uid = acc.uid ?? "";
-                        const inPool = (gwForm?.pool_uids ?? []).includes(uid);
-                        const never = (gwForm?.no_sync_uids ?? []).includes(uid);
-                        return (
-                          <div key={acc.id} className="flex items-center justify-between gap-3 rounded-lg border border-border/60 px-3 py-2">
-                            <span className={cn("truncate text-sm", never && "text-muted-foreground line-through")}>
-                              {acc.nickname || acc.email || acc.uid || acc.id}
-                            </span>
-                            <div className="flex shrink-0 items-center gap-3 text-[11px] text-muted-foreground">
-                              <label className="flex items-center gap-1.5">
-                                <Switch checked={inPool} onCheckedChange={() => void togglePoolUid(uid)} disabled={!uid || never} />
-                                入池
-                              </label>
-                              <label className="flex items-center gap-1.5">
-                                <Switch checked={never} onCheckedChange={() => void toggleNoSyncUid(uid)} disabled={!uid} />
-                                永不入池
-                              </label>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-                <div className="flex justify-end px-4 py-3 sm:px-5">
-                  <Button onClick={() => void handleGwSaveConfig()} disabled={!gwForm}>
-                    保存配置
-                  </Button>
-                </div>
-              </Section>
-            </>
-          ) : null}
-        </TabsContent>
 
         <TabsContent value="models" className="space-y-6">
           {configured ? (
@@ -888,17 +698,28 @@ export default function GatewayPage() {
         </TabsContent>
 
         <TabsContent value="gateway" className="space-y-6">
-          <div className="grid min-w-0 gap-6 xl:grid-cols-2">
-            <Section title="运行状态" description="账号池状态每 20 秒自动刷新">
+          <Tabs value={gwSubTab} onValueChange={setGwSubTab}>
+            <TabsList>
+              <TabsTrigger value="status">状态</TabsTrigger>
+              <TabsTrigger value="settings">设置</TabsTrigger>
+              <TabsTrigger value="accounts">账号池</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="status" className="space-y-6">
+              <Section title="运行状态" description="账号池状态每 20 秒自动刷新">
               <div className="mx-4 grid grid-cols-2 gap-2 py-3 sm:mx-5 sm:grid-cols-4">
                 <Stat
-                  label="服务"
+                  label="服务状态"
                   value={gw?.running ? (gw.healthy ? "运行中" : "已启动") : "未运行"}
                   tone={gw?.running ? "ok" : "off"}
                 />
-                <Stat label="健康" value={gw?.healthy ? "健康" : "—"} tone={gw?.healthy ? "ok" : "warn"} />
-                <Stat label="端口" value={gw?.port ?? gwForm?.port ?? 54321} />
-                <Stat label="二进制" value={gw?.bin ? "已定位" : "未定位"} tone={gw?.bin ? "ok" : "warn"} />
+                <Stat label="健康账号" value={summary?.healthy ?? "—"} tone={(summary?.healthy ?? 0) > 0 ? "ok" : "warn"} />
+                <Stat
+                  label="冷却 / 禁用"
+                  value={`${summary?.cooling ?? 0} / ${summary?.disabled ?? 0}`}
+                  tone="warn"
+                />
+                <Stat label="粘性会话" value={summary?.sticky_sessions ?? 0} />
               </div>
 
               <Row>
@@ -937,9 +758,11 @@ export default function GatewayPage() {
                 </Button>
               </Row>
               {syncResult && <div className="mx-4 pb-3 text-[11px] text-muted-foreground sm:mx-5">{syncResult}</div>}
-            </Section>
+              </Section>
+            </TabsContent>
 
-            <Section title="网关设置" description="工作模式、服务端口与访问密钥(保存后生效)">
+            <TabsContent value="settings" className="space-y-6">
+              <Section title="网关设置" description="工作模式、服务端口与访问密钥(保存后生效)">
               <Row className="flex-col items-stretch gap-2 sm:flex-row sm:items-center">
                 <div className="min-w-0">
                   <div className="text-[13px]">工作模式</div>
@@ -1088,39 +911,165 @@ export default function GatewayPage() {
                 </div>
                 <Switch checked={gwForm?.auto_start ?? false} onCheckedChange={(v) => setGwForm((f) => (f ? { ...f, auto_start: v } : f))} />
               </Row>
-            </Section>
-          </div>
+              <div className="flex justify-end px-4 py-3 sm:px-5">
+                <Button onClick={() => void handleGwSaveConfig()} disabled={!gwForm}>
+                  保存网关配置
+                </Button>
+              </div>
+              </Section>
+            </TabsContent>
 
-          <Section title="高级配置" description="二进制路径与独立升级">
-            <Row>
-              <div className="min-w-0">
-                <div className="text-[13px]">网关二进制路径</div>
-                <div className="mt-0.5 text-[11px] text-muted-foreground">留空自动查找 ~/.wbh/gateway/bin</div>
-              </div>
-              <Input value={gwForm?.bin_path ?? ""} onChange={setGwField("bin_path")} placeholder="/path/to/wb2api" className="h-8 w-full text-xs sm:w-80 sm:shrink-0" />
-            </Row>
-            <Row>
-              <div className="min-w-0">
-                <div className="text-[13px]">升级源 update_source</div>
-                <div className="mt-0.5 text-[11px] text-muted-foreground">二进制 URL 或本地路径;与客户端升级解耦</div>
-              </div>
-              <div className="flex shrink-0 items-center gap-1.5">
-                <Input value={gwForm?.update_source ?? ""} onChange={setGwField("update_source")} placeholder="https://…/wb2api 或 /path/to/wb2api" className="h-8 w-full text-xs sm:w-64" />
-                <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => void handleGwCheckUpdate()} disabled={gwUpdating}>
-                  检查
-                </Button>
-                <Button size="sm" className="h-8 text-xs" onClick={() => void handleGwApplyUpdate()} disabled={gwUpdating}>
-                  更新
-                </Button>
-              </div>
-            </Row>
-            {gwUpdateMsg && <div className="mx-4 pb-3 text-[11px] text-muted-foreground sm:mx-5">{gwUpdateMsg}</div>}
-            <div className="flex justify-end px-4 py-3 sm:px-5">
-              <Button onClick={() => void handleGwSaveConfig()} disabled={!gwForm}>
-                保存网关配置
-              </Button>
-            </div>
-          </Section>
+            <TabsContent value="accounts" className="space-y-6">
+              <Section
+                title="池内账号"
+                description={
+                  pool?.configured
+                    ? `${pool.accounts.length} 个账号在网关池中;状态来自 /status`
+                    : "未配置 authDir,仅显示池状态"
+                }
+              >
+                <div className="min-w-0 px-4 pt-3 pb-4 sm:px-5">
+                  {loading && !pool ? (
+                    <Skeleton className="h-24 w-full" />
+                  ) : pool && pool.accounts.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">池内暂无账号,请在下方添加。</p>
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>昵称</TableHead>
+                          <TableHead>UID</TableHead>
+                          <TableHead>域</TableHead>
+                          <TableHead>积分</TableHead>
+                          <TableHead>状态</TableHead>
+                          <TableHead className="text-right">操作</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {(pool?.accounts ?? []).map((acc) => (
+                          <TableRow key={acc.uid}>
+                            <TableCell className="font-medium">{acc.nickname || acc.uid}</TableCell>
+                            <TableCell className="font-mono text-xs">{acc.uid.slice(0, 8)}</TableCell>
+                            <TableCell className="text-xs">{acc.realm || "cn"}</TableCell>
+                            <TableCell className="tabular-nums">{acc.pool ? acc.pool.credits : "—"}</TableCell>
+                            <TableCell>
+                              <StatusBadge state={acc.pool} />
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <div className="flex justify-end gap-1.5">
+                                {acc.pool?.manual_disabled ? (
+                                  <Button size="sm" variant="outline" onClick={() => void handleAccountOp(acc.uid, "enable")}>
+                                    启用
+                                  </Button>
+                                ) : (
+                                  <Button size="sm" variant="outline" onClick={() => void handleAccountOp(acc.uid, "disable")}>
+                                    停用
+                                  </Button>
+                                )}
+                                {acc.pool?.disabled && (
+                                  <Button size="sm" variant="secondary" onClick={() => void handleAccountOp(acc.uid, "revive")}>
+                                    复活
+                                  </Button>
+                                )}
+                                <Button size="sm" variant="ghost" onClick={() => void handleOffboard(acc.uid)}>
+                                  <Trash2 className="size-4" />
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+                </div>
+              </Section>
+
+              <Section title="添加账号入池" description="选择本地账号库中的账号入池;也可扫码新增账号">
+                <div className="flex flex-wrap items-end gap-3 px-4 py-3 sm:px-5">
+                  <div className="min-w-[220px] flex-1 space-y-1.5">
+                    <Label>选择本地账号</Label>
+                    <Select value={selectedAccountId} onValueChange={setSelectedAccountId}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="选择要入池的账号" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {onboardOptions.length === 0 && (
+                          <div className="px-2 py-1.5 text-sm text-muted-foreground">本地账号库为空,请先扫码添加</div>
+                        )}
+                        {onboardOptions.map((opt) => (
+                          <SelectItem key={opt.id} value={opt.id}>
+                            {opt.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button onClick={() => void handleOnboard()} disabled={!selectedAccountId || onboarding}>
+                    <Plug className="size-4" /> {onboarding ? "入池中…" : "添加进池"}
+                  </Button>
+                  <Button variant="outline" onClick={() => setOauthOpen(true)}>
+                    <ArrowLeftRight className="size-4" /> 扫码新增账号
+                  </Button>
+                </div>
+              </Section>
+
+              <Section title="入池策略" description="手动勾选入池、自动入池与永不入池名单">
+                <Row>
+                  <div className="min-w-0">
+                    <div className="text-[13px]">自动入池</div>
+                    <div className="mt-0.5 text-[11px] text-muted-foreground">
+                      开启后本地账号库的账号自动进入网关池(仍受下方「永不入池」约束)
+                    </div>
+                  </div>
+                  <Switch
+                    checked={gwForm?.sync_enabled ?? false}
+                    onCheckedChange={(v) => setGwForm((f) => (f ? { ...f, sync_enabled: v } : f))}
+                  />
+                </Row>
+                <div className="min-w-0 space-y-3 px-4 pt-3 pb-4 sm:px-5">
+                  <div className="text-[13px]">
+                    账号入池与永不入池
+                    <span className="ml-2 text-[11px] font-normal text-muted-foreground">
+                      左侧开关「入池选择」,右侧开关「永不入池」(优先)
+                    </span>
+                  </div>
+                  {localAccounts.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">本地账号库为空,请先扫码添加</p>
+                  ) : (
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {localAccounts.map((acc) => {
+                        const uid = acc.uid ?? "";
+                        const inPool = (gwForm?.pool_uids ?? []).includes(uid);
+                        const never = (gwForm?.no_sync_uids ?? []).includes(uid);
+                        return (
+                          <div key={acc.id} className="flex items-center justify-between gap-3 rounded-lg border border-border/60 px-3 py-2">
+                            <span className={cn("truncate text-sm", never && "text-muted-foreground line-through")}>
+                              {acc.nickname || acc.email || acc.uid || acc.id}
+                            </span>
+                            <div className="flex shrink-0 items-center gap-3 text-[11px] text-muted-foreground">
+                              <label className="flex items-center gap-1.5">
+                                <Switch checked={inPool} onCheckedChange={() => void togglePoolUid(uid)} disabled={!uid || never} />
+                                入池
+                              </label>
+                              <label className="flex items-center gap-1.5">
+                                <Switch checked={never} onCheckedChange={() => void toggleNoSyncUid(uid)} disabled={!uid} />
+                                永不入池
+                              </label>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+                <div className="flex justify-end px-4 py-3 sm:px-5">
+                  <Button onClick={() => void handleGwSaveConfig()} disabled={!gwForm}>
+                    保存配置
+                  </Button>
+                </div>
+              </Section>
+            </TabsContent>
+          </Tabs>
         </TabsContent>
       </Tabs>
 

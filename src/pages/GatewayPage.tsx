@@ -7,6 +7,13 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -83,6 +90,7 @@ export default function GatewayPage() {
   const [loadingUpstream, setLoadingUpstream] = useState(false);
   const [savingUpstream, setSavingUpstream] = useState(false);
   const [showKey, setShowKey] = useState(false);
+  const [connOpen, setConnOpen] = useState(false);
 
   const configured = Boolean(config && (config.authDir || config.baseUrl));
 
@@ -250,20 +258,32 @@ export default function GatewayPage() {
             对接 workbuddy2api:纳管账号入池、查看池状态与用量、维护配置。
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => void loadAll()} disabled={loading}>
-          <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} /> 刷新
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setConnOpen(true)}
+            title="接入配置(WorkBuddy Provider)"
+            aria-label="接入配置"
+          >
+            <Plug className="size-4" />
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => void loadAll()} disabled={loading}>
+            <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} /> 刷新
+          </Button>
+        </div>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">接入配置 · WorkBuddy Provider</CardTitle>
-          <CardDescription>
-            把本反代作为 Provider 配到客户端(cc-switch / Codex / OpenAI 兼容工具)所需的关键信息。
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-2">
+      <Dialog open={connOpen} onOpenChange={setConnOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>接入配置 · WorkBuddy Provider</DialogTitle>
+            <DialogDescription>
+              把本反代作为 Provider 配到客户端(cc-switch / Codex / OpenAI 兼容工具)所需的关键信息。
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label>Base URL(OpenAI 兼容)</Label>
               <div className="flex items-center gap-2">
@@ -333,8 +353,9 @@ export default function GatewayPage() {
               <code>http://127.0.0.1:7864/v1</code> + manager 签发的 <code>wbk_…</code> 密钥。
             </AlertDescription>
           </Alert>
-        </CardContent>
-      </Card>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {error && (
         <Alert variant="destructive">

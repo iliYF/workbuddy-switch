@@ -148,15 +148,15 @@ pub fn router() -> Router {
         .route("/api/wb2api/stats", get(api_wb2api_stats))
         .route("/api/wb2api/pool-accounts", get(api_wb2api_pool_accounts))
         .route(
-            "/api/wb2api/accounts/{uid}/disable",
+            "/api/wb2api/accounts/:uid/disable",
             post(api_wb2api_account_disable),
         )
         .route(
-            "/api/wb2api/accounts/{uid}/enable",
+            "/api/wb2api/accounts/:uid/enable",
             post(api_wb2api_account_enable),
         )
         .route(
-            "/api/wb2api/accounts/{uid}/revive",
+            "/api/wb2api/accounts/:uid/revive",
             post(api_wb2api_account_revive),
         )
         .route("/api/wb2api/onboard", post(api_wb2api_onboard))

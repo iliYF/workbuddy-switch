@@ -287,6 +287,40 @@ export default function GatewayPage() {
     }
   }
 
+  const [gwUpdateMsg, setGwUpdateMsg] = useState("");
+  const [gwUpdating, setGwUpdating] = useState(false);
+
+  async function handleGwCheckUpdate() {
+    setGwUpdating(true);
+    try {
+      const r = await api.wb2api.gatewayCheckUpdate();
+      setGwUpdateMsg(
+        r.available ? `更新可用: ${r.path || r.url || ""}${r.size ? ` (${r.size} 字节)` : ""}` : `无可用更新: ${r.message ?? ""}`,
+      );
+    } catch (e) {
+      setGwUpdateMsg(asError(e));
+    } finally {
+      setGwUpdating(false);
+    }
+  }
+
+  async function handleGwApplyUpdate() {
+    setGwUpdating(true);
+    try {
+      const r = await api.wb2api.gatewayApplyUpdate();
+      setGwUpdateMsg(
+        r.ok
+          ? `已更新 ${r.bin}(${r.size} 字节)${r.restarted ? ",网关已重启" : ""}${r.restart_error ? `,重启失败: ${r.restart_error}` : ""}`
+          : "更新失败",
+      );
+      await refreshGw();
+    } catch (e) {
+      setGwUpdateMsg(`更新失败: ${asError(e)}`);
+    } finally {
+      setGwUpdating(false);
+    }
+  }
+
   const setGwField = (key: keyof GatewayConfig) => (e: ChangeEvent<HTMLInputElement>) =>
     setGwForm((f) => (f ? { ...f, [key]: e.target.value } : f));
 
@@ -874,6 +908,10 @@ export default function GatewayPage() {
                   <Input value={gwForm?.api_key ?? ""} onChange={setGwField("api_key")} type="password" placeholder="留空=不鉴权" />
                 </div>
                 <div className="space-y-1.5">
+                  <Label>升级源 update_source(二进制 URL 或本地路径)</Label>
+                  <Input value={gwForm?.update_source ?? ""} onChange={setGwField("update_source")} placeholder="https://…/wb2api 或 /path/to/wb2api" />
+                </div>
+                <div className="space-y-1.5">
                   <Label>工作模式</Label>
                   <Select
                     value={gwForm?.mode ?? "balance"}
@@ -907,6 +945,21 @@ export default function GatewayPage() {
                     随 App 启动
                   </label>
                 </div>
+              </div>
+
+              <Separator />
+
+              <div className="space-y-2">
+                <div className="font-medium text-sm">网关独立升级(与客户端升级解耦)</div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button size="sm" variant="outline" onClick={() => void handleGwCheckUpdate()} disabled={gwUpdating}>
+                    {gwUpdating ? "处理中…" : "检查更新"}
+                  </Button>
+                  <Button size="sm" onClick={() => void handleGwApplyUpdate()} disabled={gwUpdating}>
+                    下载并替换(可选 sha256 校验,网关在跑则重启)
+                  </Button>
+                </div>
+                {gwUpdateMsg && <p className="text-sm text-muted-foreground">{gwUpdateMsg}</p>}
               </div>
 
               <Button onClick={() => void handleGwSaveConfig()} disabled={!gwForm}>

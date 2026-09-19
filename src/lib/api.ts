@@ -40,6 +40,8 @@ import type {
   Wb2apiStats,
   GatewayConfig,
   GatewayStatus,
+  GatewayUpdateCheck,
+  GatewayUpdateResult,
   WbVariant,
 } from "./types";
 import { DEMO_UNAVAILABLE_MESSAGE, demoModeEnabled } from "./demo-mode";
@@ -727,4 +729,10 @@ export const wb2api = {
       "/api/wb2api/sync/now",
       {},
     ),
+  /** 网关独立升级:检查更新源。 */
+  gatewayCheckUpdate: () =>
+    wb2apiFetch<GatewayUpdateCheck>("GET", "/api/wb2api/gateway/update/check"),
+  /** 网关独立升级:下载并替换二进制(可选 sha256),网关在跑则重启。 */
+  gatewayApplyUpdate: (sha256?: string) =>
+    wb2apiFetch<GatewayUpdateResult>("POST", "/api/wb2api/gateway/update", { sha256 }),
 };

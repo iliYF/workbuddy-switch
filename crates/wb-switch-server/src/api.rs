@@ -156,6 +156,8 @@ pub fn router() -> Router {
             "/api/wb2api/gateway/config",
             get(api_gateway_config_get).post(api_gateway_config_save),
         )
+        .route("/api/wb2api/gateway/update/check", get(api_gateway_update_check))
+        .route("/api/wb2api/gateway/update", post(api_gateway_update_apply))
         // 账号单向推送
         .route("/api/wb2api/sync/now", post(api_sync_now))
         .route(
@@ -912,6 +914,20 @@ async fn api_gateway_config_save(Json(body): Json<Value>) -> Response {
 /// 账号单向推送:立即把账号库导出到网关 auths(手动触发)。
 async fn api_sync_now() -> Response {
     json_ok(account_sync::sync_now())
+}
+
+/// 网关独立升级:检查更新源可达性。
+async fn api_gateway_update_check() -> Response {
+    json_ok(gateway_manage::check_gateway_update().await)
+}
+
+/// 网关独立升级:下载/拷贝并替换二进制(可选 sha256 校验),网关在跑则重启。
+async fn api_gateway_update_apply(Json(body): Json<Value>) -> Response {
+    let sha256 = body.get("sha256").and_then(Value::as_str);
+    match gateway_manage::apply_gateway_update(sha256).await {
+        Ok(v) => json_ok(v),
+        Err(e) => json_err(e, StatusCode::BAD_REQUEST),
+    }
 }
 
 async fn api_wb2api_account_disable(Path(uid): Path<String>, Json(body): Json<Value>) -> Response {

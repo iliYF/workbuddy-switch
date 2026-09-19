@@ -50,13 +50,14 @@ pub fn default_gateway_config() -> Value {
         "mode": "balance",
         "pinned_uid": null,
         "auto_start": false,
+        "update_source": "",
     })
 }
 
 fn merge_gateway_config(input: &Value) -> Value {
     let mut merged = default_gateway_config();
     if let Some(map) = input.as_object() {
-        for key in ["bin_path", "api_key", "mode"] {
+        for key in ["bin_path", "api_key", "mode", "update_source"] {
             if let Some(v) = map.get(key).and_then(Value::as_str) {
                 if !v.trim().is_empty() {
                     merged[key] = json!(v.trim());
@@ -259,6 +260,105 @@ pub async fn gateway_status() -> Value {
         "bin": locate_gateway().map(|p| p.to_string_lossy().to_string()),
         "config": load_gateway_config(),
     })
+}
+
+// ---------------------------------------------------------------------------
+// 网关独立升级(与客户端升级解耦)
+// ---------------------------------------------------------------------------
+
+fn cfg_update_source() -> String {
+    cfg_str("update_source")
+}
+
+/// 检查更新源:本地路径则报 size;URL 则 HEAD 探测可达性。
+pub async fn check_gateway_update() -> Value {
+    let src = cfg_update_source();
+    if src.is_empty() {
+        return json!({ "available": false, "message": "未配置更新源(update_source)" });
+    }
+    let path = std::path::Path::new(&src);
+    if path.exists() {
+        let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+        return json!({ "available": true, "source": "local", "path": src, "size": size });
+    }
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => return json!({ "available": false, "message": format!("HTTP 客户端失败: {e}") }),
+    };
+    match client.head(&src).send().await {
+        Ok(resp) if resp.status().is_success() => {
+            json!({ "available": true, "source": "url", "url": src })
+        }
+        Ok(resp) => json!({ "available": false, "message": format!("更新源响应 {}", resp.status()) }),
+        Err(e) => json!({ "available": false, "message": format!("更新源不可达: {e}") }),
+    }
+}
+
+/// 下载(或拷贝本地)并原子替换网关二进制;可选 sha256 校验;网关在跑则用新二进制重启。
+pub async fn apply_gateway_update(sha256: Option<&str>) -> Result<Value, String> {
+    let src = cfg_update_source();
+    if src.is_empty() {
+        return Err("未配置更新源(update_source)".to_string());
+    }
+    std::fs::create_dir_all(gateway_bin_dir()).map_err(|e| e.to_string())?;
+
+    let path = std::path::Path::new(&src);
+    let bytes = if path.exists() {
+        std::fs::read(path).map_err(|e| format!("读取本地更新文件失败: {e}"))?
+    } else {
+        let resp = reqwest::get(&src).await.map_err(|e| format!("下载失败: {e}"))?;
+        if !resp.status().is_success() {
+            return Err(format!("下载失败: HTTP {}", resp.status()));
+        }
+        resp.bytes().await.map_err(|e| format!("读取下载内容失败: {e}"))?.to_vec()
+    };
+    if bytes.is_empty() {
+        return Err("下载内容为空".to_string());
+    }
+
+    if let Some(expected) = sha256.map(str::trim).filter(|s| !s.is_empty()) {
+        use sha2::Digest;
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(&bytes);
+        let actual = format!("{:x}", hasher.finalize());
+        if !actual.eq_ignore_ascii_case(expected) {
+            return Err(format!("SHA256 校验失败: 期望 {expected},实际 {actual}"));
+        }
+    }
+
+    let was_running = process_alive();
+    if was_running {
+        let _ = stop_gateway();
+    }
+
+    let target = gateway_bin_dir().join("wb2api");
+    let tmp = gateway_bin_dir().join("wb2api.new");
+    std::fs::write(&tmp, &bytes).map_err(|e| format!("写临时文件失败: {e}"))?;
+    std::fs::rename(&tmp, &target).map_err(|e| format!("替换二进制失败: {e}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755));
+    }
+
+    let mut out = json!({
+        "ok": true,
+        "bin": target.to_string_lossy(),
+        "size": bytes.len(),
+    });
+    if was_running {
+        match start_gateway().await {
+            Ok(v) => {
+                out["restarted"] = json!(true);
+                out["status"] = v;
+            }
+            Err(e) => out["restart_error"] = json!(e),
+        }
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

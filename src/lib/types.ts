@@ -664,6 +664,28 @@ export interface GatewayConfig {
   mode: "balance" | "pinned";
   pinned_uid: string | null;
   auto_start: boolean;
+  /** 网关独立升级源:二进制 URL 或本地文件路径。 */
+  update_source: string;
+}
+
+/** 网关升级检查结果。 */
+export interface GatewayUpdateCheck {
+  available: boolean;
+  message?: string;
+  source?: string;
+  path?: string;
+  url?: string;
+  size?: number;
+}
+
+/** 网关升级应用结果。 */
+export interface GatewayUpdateResult {
+  ok: boolean;
+  bin: string;
+  size: number;
+  restarted?: boolean;
+  status?: unknown;
+  restart_error?: string;
 }
 
 /** 网关托管状态:进程/健康/端口/二进制 + 当前配置。 */

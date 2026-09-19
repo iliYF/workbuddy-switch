@@ -76,7 +76,7 @@ export default function GatewayPage() {
   const [models, setModels] = useState<Wb2apiModel[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [activeTab, setActiveTab] = useState("pool");
+  const [activeTab, setActiveTab] = useState("gateway");
 
   // 纳管
   const [selectedAccountId, setSelectedAccountId] = useState("");
@@ -564,10 +564,10 @@ export default function GatewayPage() {
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
+          <TabsTrigger value="gateway">网关</TabsTrigger>
           <TabsTrigger value="pool">池账号</TabsTrigger>
           <TabsTrigger value="stats">统计</TabsTrigger>
           <TabsTrigger value="config">配置</TabsTrigger>
-          <TabsTrigger value="manage">托管</TabsTrigger>
         </TabsList>
 
         <TabsContent value="pool" className="space-y-4">
@@ -906,12 +906,12 @@ export default function GatewayPage() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="manage" className="space-y-4">
+        <TabsContent value="gateway" className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">网关托管</CardTitle>
+              <CardTitle className="text-base">网关</CardTitle>
               <CardDescription>
-                托管独立的 workbuddy2api 二进制:起停/健康/端口/工作模式;升级走独立通道,与客户端解耦。
+                状态与启停、基本配置(端口/密钥/工作模式/自动同步)、独立升级。
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">

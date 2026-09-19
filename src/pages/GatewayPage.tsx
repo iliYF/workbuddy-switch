@@ -116,7 +116,7 @@ function Stat({
 }) {
   return (
     <div className="min-w-0 rounded-lg border border-border/60 px-3 py-2">
-      <div className="text-[11px] text-muted-foreground">{label}</div>
+      <div className="text-xs text-muted-foreground">{label}</div>
       <div
         className={cn(
           "mt-0.5 truncate text-[15px] font-medium tabular-nums",
@@ -515,21 +515,19 @@ export default function GatewayPage() {
 
   return (
     <div className="mx-auto w-full max-w-[1800px] space-y-6 px-5 py-6 sm:px-8 sm:py-8">
-      <header className="flex min-w-0 items-start justify-between gap-3">
+      <header className="mb-6 flex min-w-0 flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="flex items-center gap-2 text-lg font-medium leading-6">
-            <Server className="size-4.5 shrink-0" /> 网关管理
-          </h1>
-          <p className="mt-1 text-xs text-muted-foreground">
+          <h1 className="text-[28px] font-semibold tracking-tight">网关管理</h1>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
             对接 workbuddy2api:纳管账号入池、查看池状态与用量、维护配置。
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setConnOpen(true)}>
-            <Plug className="size-3.5" /> 接入配置
+          <Button variant="outline" size="sm" className="h-8 gap-1.5 text-sm" onClick={() => setConnOpen(true)}>
+            <Plug className="size-4" /> 接入配置
           </Button>
-          <Button variant="ghost" size="icon" className="shrink-0" onClick={() => void loadAll()} disabled={loading} aria-label="刷新">
-            <RefreshCw className={cn("size-4", loading && "animate-spin")} />
+          <Button variant="outline" size="sm" className="h-8 gap-1.5 text-sm" onClick={() => void loadAll()} disabled={loading}>
+            <RefreshCw className={cn("size-4", loading && "animate-spin")} /> 刷新
           </Button>
         </div>
       </header>
@@ -698,7 +696,7 @@ export default function GatewayPage() {
                           </Button>
                         )}
                       </div>
-                      <div className="text-[11px] text-muted-foreground">
+                      <div className="text-xs text-muted-foreground">
                         匹配 {modelGroups.reduce((n, [, l]) => n + l.length, 0)} 个模型
                       </div>
                       {modelGroups.length === 0 ? (
@@ -832,7 +830,7 @@ export default function GatewayPage() {
               <Row>
                 <div className="min-w-0">
                   <div className="text-[13px]">OpenAI 兼容接口</div>
-                  <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">{connBaseUrlV1}</div>
+                  <div className="mt-0.5 truncate font-mono text-xs text-muted-foreground">{connBaseUrlV1}</div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1.5">
                   <Button variant="ghost" size="icon" className="size-7" onClick={() => void copyText(connBaseUrlV1, "接口地址")} aria-label="复制接口地址">
@@ -864,7 +862,7 @@ export default function GatewayPage() {
               <Row className="flex-col items-stretch gap-2 sm:flex-row sm:items-center">
                 <div className="min-w-0">
                   <div className="text-[13px]">工作模式</div>
-                  <div className="mt-0.5 text-[11px] text-muted-foreground">
+                  <div className="mt-0.5 text-xs text-muted-foreground">
                     {gwForm?.mode === "pinned"
                       ? "只使用指定的这一个账号"
                       : gwForm?.mode === "rotation"
@@ -904,7 +902,7 @@ export default function GatewayPage() {
                 <Row className="flex-col items-stretch gap-2 sm:flex-row sm:items-center">
                   <div className="min-w-0">
                     <Label className="text-[13px] font-normal">使用账号</Label>
-                    <div className="mt-0.5 text-[11px] text-muted-foreground">
+                    <div className="mt-0.5 text-xs text-muted-foreground">
                       {localAccounts.length ? `共 ${localAccounts.length} 个账号可选` : "账号库为空"}
                     </div>
                   </div>
@@ -931,7 +929,7 @@ export default function GatewayPage() {
                 <Row className="flex-col items-stretch gap-2 sm:flex-row sm:items-center">
                   <div className="min-w-0">
                     <div className="text-[13px]">当前活跃账号</div>
-                    <div className="mt-0.5 text-[11px] text-muted-foreground">
+                    <div className="mt-0.5 text-xs text-muted-foreground">
                       轮转由 hub 按积分到期日巡检维护;留空则由网关自身调度
                     </div>
                   </div>
@@ -957,7 +955,7 @@ export default function GatewayPage() {
               <Row className="flex-col items-stretch gap-2 sm:flex-row sm:items-center">
                 <div className="min-w-0">
                   <div className="text-[13px]">服务端口</div>
-                  <div className="mt-0.5 text-[11px] text-muted-foreground">开放接口地址随端口变化;可一键生成空闲端口</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">开放接口地址随端口变化;可一键生成空闲端口</div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1.5">
                   <Input
@@ -975,7 +973,7 @@ export default function GatewayPage() {
               <Row className="flex-col items-stretch gap-2 sm:flex-row sm:items-center">
                 <div className="min-w-0">
                   <div className="text-[13px]">访问密钥 API Key</div>
-                  <div className="mt-0.5 text-[11px] text-muted-foreground">用于客户端接入鉴权(wbs- 前缀);可一键生成</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">用于客户端接入鉴权(wbs- 前缀);可一键生成</div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1.5">
                   <div className="relative">
@@ -1005,7 +1003,7 @@ export default function GatewayPage() {
               <Row>
                 <div className="min-w-0">
                   <div className="text-[13px]">自动启动网关</div>
-                  <div className="mt-0.5 text-[11px] text-muted-foreground">应用启动时自动拉起网关</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">应用启动时自动拉起网关</div>
                 </div>
                 <Switch checked={gwForm?.auto_start ?? false} onCheckedChange={(v) => setGwForm((f) => (f ? { ...f, auto_start: v } : f))} />
               </Row>
@@ -1084,13 +1082,13 @@ export default function GatewayPage() {
                           </span>
                           <StatusBadge state={acc.pool} />
                         </div>
-                        <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+                        <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
                           <span className="font-mono">{acc.uid.slice(0, 8)}</span>
                           <span>{acc.realm || "cn"}</span>
                           <span className="tabular-nums">积分 {acc.pool ? acc.pool.credits : "—"}</span>
                         </div>
                         <div className="mt-auto flex items-center justify-between gap-2 pt-1">
-                          <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+                          <div className="flex items-center gap-3 text-xs text-muted-foreground">
                             <label className="flex items-center gap-1.5">
                               <Switch checked={inPool} onCheckedChange={() => void togglePoolUid(acc.uid)} disabled={never} />
                               入池
@@ -1132,7 +1130,7 @@ export default function GatewayPage() {
             <Row>
               <div className="min-w-0">
                 <div className="text-[13px]">运行版本</div>
-                <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                <div className="mt-0.5 truncate text-xs text-muted-foreground">
                   {gw?.bin ? gw.bin.split("/").pop() : "未定位到网关二进制"}
                   {gw?.running ? " · 运行中" : " · 未运行"}
                 </div>
@@ -1149,7 +1147,7 @@ export default function GatewayPage() {
             <Row>
               <div className="min-w-0">
                 <div className="text-[13px]">项目主页</div>
-                <div className="mt-0.5 text-[11px] text-muted-foreground">workbuddy2api(上游 OpenAI 兼容网关)</div>
+                <div className="mt-0.5 text-xs text-muted-foreground">workbuddy2api(上游 OpenAI 兼容网关)</div>
               </div>
               <Button
                 size="sm"
@@ -1160,7 +1158,7 @@ export default function GatewayPage() {
                 <ExternalLink className="size-3.5" /> 打开 GitHub
               </Button>
             </Row>
-            {gwUpdateMsg && <div className="mx-4 pb-3 text-[11px] text-muted-foreground sm:mx-5">{gwUpdateMsg}</div>}
+            {gwUpdateMsg && <div className="mx-4 pb-3 text-xs text-muted-foreground sm:mx-5">{gwUpdateMsg}</div>}
             <div className="flex justify-end px-4 py-3 sm:px-5">
               <Button onClick={() => void handleGwSaveConfig()} disabled={!gwForm}>
                 保存网关配置

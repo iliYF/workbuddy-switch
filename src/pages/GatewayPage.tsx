@@ -42,8 +42,8 @@ import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { OAuthLoginDialog } from "@/components/oauth-login-dialog";
-import * as api from "@/lib/api";
 import { asError } from "@/lib/api";
+import { wb2api } from "@/lib/wb2api";
 import type {
   GatewayConfig,
   GatewayStatus,
@@ -189,19 +189,19 @@ export default function GatewayPage() {
     setLoading(true);
     setError("");
     try {
-      const cfg = await api.wb2api.getConfig();
+      const cfg = await wb2api.getConfig();
       setConfig(cfg);
       setForm(cfg);
       // 网关托管状态与对接配置相互独立,始终获取。
-      const gwRes = await api.wb2api.gatewayStatus().catch(() => null);
+      const gwRes = await wb2api.gatewayStatus().catch(() => null);
       setGw(gwRes);
       setGwForm((f) => f ?? gwRes?.config ?? null);
       if (cfg.authDir || cfg.baseUrl) {
         const [p, summaryRes, statsRes, catalogRes] = await Promise.all([
-          api.wb2api.poolAccounts(),
-          api.wb2api.status().catch(() => null),
-          api.wb2api.stats().catch(() => null),
-          api.wb2api.modelCatalog().catch(() => null),
+          wb2api.poolAccounts(),
+          wb2api.status().catch(() => null),
+          wb2api.stats().catch(() => null),
+          wb2api.modelCatalog().catch(() => null),
         ]);
         setPool(p);
         setSummary(summaryRes);
@@ -224,7 +224,7 @@ export default function GatewayPage() {
   useEffect(() => {
     if (!configured) return;
     const timer = window.setInterval(() => {
-      void api.wb2api.poolAccounts().then(setPool).catch(() => {});
+      void wb2api.poolAccounts().then(setPool).catch(() => {});
     }, 20_000);
     return () => window.clearInterval(timer);
   }, [configured]);
@@ -233,7 +233,7 @@ export default function GatewayPage() {
     if (!selectedAccountId) return;
     setOnboarding(true);
     try {
-      const res = await api.wb2api.onboard(selectedAccountId);
+      const res = await wb2api.onboard(selectedAccountId);
       toast.success("已纳管到网关", { description: `${res.uid} · 5s 内热加载入池` });
       setSelectedAccountId("");
       void loadAll();
@@ -246,7 +246,7 @@ export default function GatewayPage() {
 
   async function handleAccountOp(uid: string, op: "disable" | "enable" | "revive") {
     try {
-      await api.wb2api.accountOp(uid, op);
+      await wb2api.accountOp(uid, op);
       toast.success("操作成功");
       void loadAll();
     } catch (e) {
@@ -257,7 +257,7 @@ export default function GatewayPage() {
   async function handleOffboard(uid: string) {
     if (!window.confirm(`确定把 ${uid} 从网关池移除?凭证文件将被删除。`)) return;
     try {
-      await api.wb2api.offboard(uid);
+      await wb2api.offboard(uid);
       toast.success("已移除");
       void loadAll();
     } catch (e) {
@@ -266,7 +266,7 @@ export default function GatewayPage() {
   }
 
   async function refreshGw() {
-    const s = await api.wb2api.gatewayStatus();
+    const s = await wb2api.gatewayStatus();
     setGw(s);
     setGwForm((f) => f ?? s.config);
   }
@@ -274,7 +274,7 @@ export default function GatewayPage() {
   async function handleGwStart() {
     setGwBusy(true);
     try {
-      await api.wb2api.gatewayStart();
+      await wb2api.gatewayStart();
       toast.success("网关已启动");
       await refreshGw();
     } catch (e) {
@@ -287,7 +287,7 @@ export default function GatewayPage() {
   async function handleGwStop() {
     setGwBusy(true);
     try {
-      await api.wb2api.gatewayStop();
+      await wb2api.gatewayStop();
       toast.success("网关已停止");
       await refreshGw();
     } catch (e) {
@@ -301,8 +301,8 @@ export default function GatewayPage() {
   async function handleGwRestart() {
     setGwBusy(true);
     try {
-      await api.wb2api.gatewayStop().catch(() => {});
-      await api.wb2api.gatewayStart();
+      await wb2api.gatewayStop().catch(() => {});
+      await wb2api.gatewayStart();
       toast.success("网关已重启");
       await refreshGw();
     } catch (e) {
@@ -315,7 +315,7 @@ export default function GatewayPage() {
   async function handleGwSaveConfig() {
     if (!gwForm) return;
     try {
-      const saved = await api.wb2api.gatewaySaveConfig(gwForm);
+      const saved = await wb2api.gatewaySaveConfig(gwForm);
       setGwForm(saved);
       toast.success("网关配置已保存");
     } catch (e) {
@@ -325,7 +325,7 @@ export default function GatewayPage() {
 
   async function handleGwPickPort() {
     try {
-      const r = await api.wb2api.gatewayPickPort();
+      const r = await wb2api.gatewayPickPort();
       setGwForm((f) => (f ? { ...f, port: r.port } : f));
       toast.success(`已选空闲端口 ${r.port}`);
     } catch (e) {
@@ -339,7 +339,7 @@ export default function GatewayPage() {
     const cur = gwForm.pool_uids ?? [];
     const next = cur.includes(uid) ? cur.filter((u) => u !== uid) : [...cur, uid];
     try {
-      const saved = await api.wb2api.gatewaySaveConfig({ ...gwForm, pool_uids: next });
+      const saved = await wb2api.gatewaySaveConfig({ ...gwForm, pool_uids: next });
       setGwForm(saved);
       toast.success(next.includes(uid) ? "已加入网关池选择" : "已移出网关池选择");
     } catch (e) {
@@ -353,7 +353,7 @@ export default function GatewayPage() {
     const cur = gwForm.no_sync_uids ?? [];
     const next = cur.includes(uid) ? cur.filter((u) => u !== uid) : [...cur, uid];
     try {
-      const saved = await api.wb2api.gatewaySaveConfig({ ...gwForm, no_sync_uids: next });
+      const saved = await wb2api.gatewaySaveConfig({ ...gwForm, no_sync_uids: next });
       setGwForm(saved);
       toast.success(next.includes(uid) ? "已设为永不入池" : "已取消永不入池");
     } catch (e) {
@@ -364,7 +364,7 @@ export default function GatewayPage() {
   /** 生成随机访问密钥(wbs- 前缀)。 */
   async function handleGenKey() {
     try {
-      const r = await api.wb2api.gatewayGenKey();
+      const r = await wb2api.gatewayGenKey();
       setGwForm((f) => (f ? { ...f, api_key: r.api_key } : f));
       toast.success("已生成访问密钥(记得保存)");
     } catch (e) {
@@ -376,7 +376,7 @@ export default function GatewayPage() {
   async function handleGwCheckUpdate() {
     setGwUpdating("check");
     try {
-      const r = await api.wb2api.gatewayCheckUpdate();
+      const r = await wb2api.gatewayCheckUpdate();
       setGwUpdateMsg(
         r.available
           ? `更新可用: ${r.path || r.url || ""}${r.size ? ` (${r.size} 字节)` : ""}`
@@ -393,7 +393,7 @@ export default function GatewayPage() {
   async function handleGwApplyUpdate() {
     setGwUpdating("apply");
     try {
-      const r = await api.wb2api.gatewayApplyUpdate();
+      const r = await wb2api.gatewayApplyUpdate();
       setGwUpdateMsg(
         r.ok
           ? `已更新(${r.size} 字节)${r.restarted ? ",网关已重启" : ""}${r.restart_error ? `,重启失败: ${r.restart_error}` : ""}`

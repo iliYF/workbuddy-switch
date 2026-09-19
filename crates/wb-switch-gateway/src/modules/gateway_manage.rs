@@ -11,7 +11,7 @@ use std::sync::Mutex;
 
 use wb_switch_core::modules::config::{atomic_write, http_request};
 
-use crate::wb2api::gateway_root;
+use crate::modules::wb2api::gateway_root;
 
 /// 进程句柄:server 进程内单例(与账号库并发写一致,单实例保护由宿主负责)。
 static GATEWAY_PROC: Mutex<Option<Child>> = Mutex::new(None);
@@ -234,7 +234,7 @@ fn write_derived_wb2api_config(gw: &Value) {
         "authDir": gateway_auth_dir().to_string_lossy(),
         "configPath": gateway_native_config_file().to_string_lossy(),
     });
-    let _ = crate::wb2api::save_wb2api_config(&derived);
+    let _ = crate::modules::wb2api::save_wb2api_config(&derived);
 }
 
 fn cfg_str(key: &str) -> String {
@@ -344,7 +344,7 @@ pub async fn start_gateway() -> Result<Value, String> {
     let config_path = write_native_config()?;
     std::fs::create_dir_all(gateway_auth_dir()).map_err(|e| format!("创建 auths 目录失败: {e}"))?;
     // 启动前先同步一次账号,让网关池有凭证。
-    crate::account_sync::sync_now();
+    crate::modules::account_sync::sync_now();
     let child = Command::new(&bin)
         .arg("-config")
         .arg(&config_path)

@@ -13,8 +13,8 @@ use wb_switch_core::modules::account;
 use wb_switch_core::modules::config::atomic_write;
 use wb_switch_core::modules::variant::WbVariant;
 
-use crate::gateway_manage::{gateway_auth_dir, load_gateway_config};
-use crate::wb2api::gateway_root;
+use crate::modules::gateway_manage::{gateway_auth_dir, load_gateway_config};
+use crate::modules::wb2api::gateway_root;
 
 fn sync_state_file() -> PathBuf {
     gateway_root().join("sync.json")

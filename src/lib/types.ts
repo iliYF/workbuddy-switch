@@ -616,15 +616,27 @@ export interface Wb2apiStats {
   models: Wb2apiStatsModel[];
 }
 
-/** `/v1/models` 条目(OpenAI 格式,id 带 cn:/global: 前缀)。 */
+/** `/v1/models` 条目(OpenAI 格式,id 带 cn:/global: 前缀;上游已透出富字段)。 */
 export interface Wb2apiModel {
   id: string;
   name?: string;
   description?: string;
   context_length?: number;
   max_output_tokens?: number;
+  /** 积分倍率原文(如 "x0.05"),仅展示。 */
   credits?: string;
   owned_by?: string;
+  vendor?: string;
+  tags?: string[];
+  is_default?: boolean;
+  supports_images?: boolean;
+  supports_reasoning?: boolean;
+  supports_tool_call?: boolean;
+  only_reasoning?: boolean;
+  reasoning_effort?: string;
+  reasoning_summary?: string;
+  reasoning_supported_efforts?: string[];
+  reasoning_default_effort?: string;
   [key: string]: unknown;
 }
 

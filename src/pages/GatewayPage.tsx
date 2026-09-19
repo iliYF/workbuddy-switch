@@ -91,6 +91,7 @@ export default function GatewayPage() {
   const [savingUpstream, setSavingUpstream] = useState(false);
   const [showKey, setShowKey] = useState(false);
   const [connOpen, setConnOpen] = useState(false);
+  const [modelQuery, setModelQuery] = useState("");
 
   const configured = Boolean(config && (config.authDir || config.baseUrl));
 
@@ -228,6 +229,56 @@ export default function GatewayPage() {
   const connBaseUrlV1 = `${connBaseUrl || "http://127.0.0.1:7863"}/v1`;
   const maskedKey = connApiKey ? `${connApiKey.slice(0, 4)}••••${connApiKey.slice(-4)}` : "(未配置,填写 apiKey 后生效)";
   const sampleModels = models.slice(0, 8).map((m) => m.id);
+
+  // ── 模型中心:系列分类(按 id 前缀推导,与 manager modelcatalog 同口径) ──
+  const SERIES_RULES: [string[], string][] = [
+    [["glm"], "智谱 GLM"],
+    [["deepseek"], "DeepSeek"],
+    [["kimi", "moonshot"], "Kimi"],
+    [["minimax"], "MiniMax"],
+    [["hy", "hunyuan"], "腾讯混元"],
+    [["auto"], "自动选择"],
+  ];
+  function seriesOf(modelId: string): string {
+    const mid = modelId.toLowerCase();
+    for (const [prefixes, label] of SERIES_RULES) {
+      if (prefixes.some((p) => mid.startsWith(p))) return label;
+    }
+    return "其他";
+  }
+  function bareModelId(id: string): string {
+    return id.split(":").pop() ?? id;
+  }
+
+  const modelGroups = useMemo(() => {
+    const groups = new Map<string, Wb2apiModel[]>();
+    const q = modelQuery.trim().toLowerCase();
+    for (const m of models) {
+      if (
+        q &&
+        ![m.id, m.name ?? "", m.description ?? ""].some((s) => s.toLowerCase().includes(q))
+      ) {
+        continue;
+      }
+      const series = seriesOf(bareModelId(m.id));
+      if (!groups.has(series)) groups.set(series, []);
+      groups.get(series)!.push(m);
+    }
+    const entries = [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0], "zh"));
+    for (const [, list] of entries) {
+      list.sort((a, b) => (b.is_default ? 1 : 0) - (a.is_default ? 1 : 0) || a.id.localeCompare(b.id));
+    }
+    return entries;
+  }, [models, modelQuery]);
+
+  const modelSummary = useMemo(() => {
+    const reasoning = models.filter(
+      (m) => m.supports_reasoning || m.only_reasoning || (m.reasoning_supported_efforts?.length ?? 0) > 0,
+    ).length;
+    const large = models.filter((m) => (m.context_length ?? 0) >= 131072).length;
+    const maxCtx = Math.max(0, ...models.map((m) => m.context_length ?? 0));
+    return { total: models.length, reasoning, large, maxCtx };
+  }, [models]);
 
   async function copyText(text: string, label: string) {
     try {
@@ -507,20 +558,83 @@ export default function GatewayPage() {
               <SummaryCards summary={summary} />
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">模型列表</CardTitle>
-                  <CardDescription>{models.length} 个模型(/v1/models,id 带 cn:/global: 前缀)</CardDescription>
+                  <CardTitle className="text-base">模型中心</CardTitle>
+                  <CardDescription>
+                    共 {modelSummary.total} 个 · 推理 {modelSummary.reasoning} · 大上下文(≥128K){" "}
+                    {modelSummary.large} · 最大上下文 {modelSummary.maxCtx.toLocaleString()}
+                  </CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="space-y-4">
                   {models.length === 0 ? (
                     <p className="text-sm text-muted-foreground">暂无模型(可能无健康账号或拉取失败)。</p>
                   ) : (
-                    <div className="flex max-h-72 flex-wrap gap-1.5 overflow-y-auto">
-                      {models.map((m) => (
-                        <Badge key={m.id} variant="secondary">
-                          {m.id}
-                        </Badge>
-                      ))}
-                    </div>
+                    <>
+                      <Input
+                        value={modelQuery}
+                        onChange={(e) => setModelQuery(e.target.value)}
+                        placeholder="搜索模型(id / 名称 / 描述)…"
+                        className="max-w-sm"
+                      />
+                      {modelGroups.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">没有匹配的模型。</p>
+                      ) : (
+                        <div className="max-h-[480px] space-y-5 overflow-y-auto pr-1">
+                          {modelGroups.map(([series, list]) => (
+                            <div key={series} className="space-y-2">
+                              <div className="flex items-center gap-2 text-sm font-medium">
+                                {series}
+                                <span className="rounded-full bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+                                  {list.length}
+                                </span>
+                              </div>
+                              <div className="grid gap-2 lg:grid-cols-2">
+                                {list.map((m) => {
+                                  const bare = bareModelId(m.id);
+                                  const capBadges = [
+                                    m.is_default && "默认",
+                                    m.credits && `倍率 ${m.credits}`,
+                                    m.supports_images && "图像",
+                                    m.supports_reasoning && "推理",
+                                    m.supports_tool_call && "工具",
+                                  ].filter(Boolean) as string[];
+                                  return (
+                                    <div
+                                      key={m.id}
+                                      className="rounded-lg border bg-card p-3 text-sm shadow-none"
+                                    >
+                                      <div className="flex items-center justify-between gap-2">
+                                        <span className="font-medium">{m.name || bare}</span>
+                                        <span className="font-mono text-xs text-muted-foreground">
+                                          {bare}
+                                        </span>
+                                      </div>
+                                      {m.description ? (
+                                        <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                                          {m.description}
+                                        </p>
+                                      ) : null}
+                                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                                        <Badge variant="secondary">{(m.context_length ?? 0) >= 1024 ? `${Math.round((m.context_length ?? 0) / 1024)}K` : m.context_length ?? "—"}</Badge>
+                                        {m.reasoning_effort || m.reasoning_summary ? (
+                                          <Badge variant="outline">
+                                            {m.reasoning_effort || m.reasoning_summary}
+                                          </Badge>
+                                        ) : null}
+                                        {capBadges.map((b) => (
+                                          <Badge key={b} variant="outline">
+                                            {b}
+                                          </Badge>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </>
                   )}
                 </CardContent>
               </Card>

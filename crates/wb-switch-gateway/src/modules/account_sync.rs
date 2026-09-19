@@ -13,11 +13,29 @@ use wb_switch_core::modules::account;
 use wb_switch_core::modules::config::atomic_write;
 use wb_switch_core::modules::variant::WbVariant;
 
-use crate::modules::gateway_manage::{gateway_auth_dir, load_gateway_config};
+use crate::modules::gateway_manage::{gateway_auth_dir, gateway_config_file, load_gateway_config};
 use crate::modules::wb2api::gateway_root;
 
 fn sync_state_file() -> PathBuf {
     gateway_root().join(format!("{}sync.json", crate::modules::wb2api::GATEWAY_PREFIX))
+}
+
+/// 自动入池是否开启(配置读取;网关未初始化视为关闭)。
+pub fn auto_sync_enabled() -> bool {
+    gateway_config_file().exists()
+        && load_gateway_config()
+            .get("sync_enabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+}
+
+/// 自动入池巡检间隔(秒),从配置加载,缺省 30,钳制 [10, 3600]。
+pub fn sync_interval_seconds() -> u64 {
+    load_gateway_config()
+        .get("sync_interval_seconds")
+        .and_then(Value::as_i64)
+        .map(|v| v.clamp(10, 3600) as u64)
+        .unwrap_or(30)
 }
 
 /// 单个账号 → wb2api 嵌套凭证(对齐 SaveAtomic);保留既有 `credit` 块。
@@ -91,12 +109,21 @@ fn save_fingerprint(fp: u64) -> std::io::Result<()> {
     atomic_write(&sync_state_file(), &content)
 }
 
-/// 导出账号库到网关 auths(只导出**用户勾选入池**的账号;sync_enabled 关闭则不导出)。
-/// 按托管配置:mode=pinned 且 pinned_uid 非空时只导出该 uid;否则导出 pool_uids 交集。
-/// 导出时保留既有 `credit` 块(分层选号依据)。清理残留仅在启用同步时进行。
+/// 自动入池同步:sync_enabled 关闭时池为纯手动纳管,本函数直接跳过(不导出也不清理);
+/// 开启时导出账号库(排除 no_sync 黑名单),按 mode 收窄,并清理不再需要的残留 auths 文件。
 pub fn export_accounts_to_auths() -> Result<Value, String> {
+    // 网关未初始化(无 wbs_gateway.json,即未安装/未保存配置)时不做任何推送,
+    // 避免首次安装前就生成 wbs_auths 等文件。
+    if !gateway_config_file().exists() {
+        return Ok(json!({ "skipped": true, "exported": 0, "removed": 0, "accounts": 0 }));
+    }
     let gw = load_gateway_config();
     let sync_enabled = gw.get("sync_enabled").and_then(Value::as_bool).unwrap_or(false);
+    // 自动入池关闭时,池为纯手动纳管(添加/移除控制):同步不导出也不清理,
+    // 避免每次网关启动的强制同步把手动加入的账号清空。
+    if !sync_enabled {
+        return Ok(json!({ "skipped": true, "exported": 0, "removed": 0, "accounts": 0 }));
+    }
     let mode = gw.get("mode").and_then(Value::as_str).unwrap_or("balance");
     let pinned = gw.get("pinned_uid").and_then(Value::as_str).unwrap_or("");
     let rotation = gw.get("rotation_uid").and_then(Value::as_str).unwrap_or("");
@@ -173,6 +200,9 @@ pub fn export_accounts_to_auths() -> Result<Value, String> {
 
 /// 手动/启动强制同步:无条件导出并记录指纹。
 pub fn sync_now() -> Value {
+    if !gateway_config_file().exists() {
+        return json!({ "skipped": true, "exported": 0, "removed": 0, "accounts": 0 });
+    }
     let result = export_accounts_to_auths().unwrap_or_else(|e| json!({ "error": e }));
     let accounts = account::load_accounts();
     let _ = save_fingerprint(accounts_fingerprint(&accounts));
@@ -181,6 +211,9 @@ pub fn sync_now() -> Value {
 
 /// 增量同步:账号库指纹变化才导出(供 30s 巡检),避免无意义写盘。
 pub fn sync_if_changed() -> Value {
+    if !gateway_config_file().exists() {
+        return json!({ "changed": false, "skipped": true });
+    }
     let accounts = account::load_accounts();
     let fp = accounts_fingerprint(&accounts);
     if load_last_fingerprint() == Some(fp) {

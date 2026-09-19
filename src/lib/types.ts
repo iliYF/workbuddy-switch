@@ -560,6 +560,15 @@ export interface WB2APIPoolAccount {
   file: string;
   /** 未在池中或 status 不可达时缺失。 */
   pool?: WB2APIPoolState;
+  /** auth 文件里的分层选号依据(网关写入的积分/到期信息;缺失不影响展示)。 */
+  credit?: {
+    total?: number;
+    remaining?: number;
+    soonestExpireAt?: number;
+    expiringSoon?: boolean;
+    expired?: boolean;
+    [key: string]: unknown;
+  };
 }
 
 export interface WB2APIPoolAccounts {
@@ -679,6 +688,10 @@ export interface GatewayConfig {
   artifact?: GatewayArtifact;
   /** 自动入池:开启后本地账号库的账号自动进池(仍需不在 no_sync_uids)。 */
   sync_enabled: boolean;
+  /** 自动入池巡检间隔(秒):开启自动入池后按此间隔同步账号库;缺省 30。 */
+  sync_interval_seconds?: number;
+  /** webui 池状态刷新间隔(秒):前端页面轮询池账号/汇总的间隔;缺省 5,钳制 [5, 3600]。 */
+  webui_poll_seconds?: number;
   /** 手动入池:显式勾选入池的账号 uid 集合。 */
   pool_uids: string[];
   /** 永不入池:无论自动/手动都不导出(如主账号,避免风控)。 */
@@ -699,8 +712,12 @@ export interface GatewayUpdateCheck {
 /** 网关升级应用结果。 */
 export interface GatewayUpdateResult {
   ok: boolean;
+  /** 已是最新版本,后端跳过下载覆盖(未发生任何写入)。 */
+  skipped?: boolean;
   bin: string;
   size: number;
+  /** 安装到的远端 release tag。 */
+  version?: string;
   restarted?: boolean;
   status?: unknown;
   restart_error?: string;
@@ -712,7 +729,11 @@ export interface GatewayStatus {
   healthy: boolean;
   version?: string | null;
   port: number;
+  /** 配置端口当前是否可绑定(网关未运行时探测;运行中为自身占用)。 */
+  port_available?: boolean;
   bin?: string | null;
+  /** 网关账号凭证目录(托管配置下与 wb2api 的 auth_dir 一致)。 */
+  auth_dir?: string;
   config: GatewayConfig;
 }
 

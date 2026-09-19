@@ -72,6 +72,10 @@ pub fn default_gateway_config() -> Value {
         "pool_uids": [],
         // 永不入池:无论自动/手动都不导出(如主账号,避免风控)。
         "no_sync_uids": [],
+        // 自动入池巡检间隔(秒):开启自动入池后按此间隔同步账号库;未开启不巡检。
+        "sync_interval_seconds": 30,
+        // webui 池状态刷新间隔(秒):前端页面轮询池账号/汇总的间隔;最小 5s,最大 3600s。
+        "webui_poll_seconds": 5,
     })
 }
 
@@ -105,6 +109,16 @@ fn merge_gateway_config(input: &Value) -> Value {
         for key in ["enabled", "auto_start", "sync_enabled"] {
             if let Some(v) = map.get(key).and_then(Value::as_bool) {
                 merged[key] = json!(v);
+            }
+        }
+        if let Some(v) = map.get("sync_interval_seconds").and_then(Value::as_i64) {
+            if (10..=3600).contains(&v) {
+                merged["sync_interval_seconds"] = json!(v);
+            }
+        }
+        if let Some(v) = map.get("webui_poll_seconds").and_then(Value::as_i64) {
+            if (5..=3600).contains(&v) {
+                merged["webui_poll_seconds"] = json!(v);
             }
         }
         for key in ["pool_uids", "no_sync_uids"] {
@@ -146,6 +160,17 @@ fn merge_gateway_config(input: &Value) -> Value {
     merged
 }
 
+/// 未落盘前的内存默认配置:首次安装未确认前不生成配置文件,进程内缓存保证 api_key 稳定。
+static DEFAULT_GW_CFG: Mutex<Option<Value>> = Mutex::new(None);
+
+fn default_gateway_config_cached() -> Value {
+    DEFAULT_GW_CFG
+        .lock()
+        .unwrap()
+        .get_or_insert_with(default_gateway_config)
+        .clone()
+}
+
 pub fn load_gateway_config() -> Value {
     let f = gateway_config_file();
     if f.exists() {
@@ -166,13 +191,8 @@ pub fn load_gateway_config() -> Value {
             }
         }
     }
-    // 文件缺失:生成默认配置(含自动生成的 api_key)并落盘,保证 key 稳定不漂移。
-    let defaults = default_gateway_config();
-    if std::fs::create_dir_all(gateway_root()).is_ok() {
-        let content = serde_json::to_string_pretty(&defaults).unwrap_or_default();
-        let _ = atomic_write(&f, &content);
-    }
-    defaults
+    // 文件缺失:返回内存默认(不落盘),等安装确认/保存时才生成配置文件。
+    default_gateway_config_cached()
 }
 
 /// 保存托管配置,并从端口/密钥派生出 wb2api 对接配置(baseUrl/apiKey/authDir)。
@@ -255,6 +275,34 @@ pub fn pick_free_port(from: u16) -> u16 {
     (from..from.saturating_add(100)).find(|p| port_available(*p)).unwrap_or(from)
 }
 
+/// 伪随机种子(时间纳秒 ^ pid),避免每次生成同一起点。
+fn random_seed() -> u64 {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0);
+    let pid = std::process::id() as u64;
+    let mut x = nanos ^ pid.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 0xC2B2_AE3D_27D4_EB4F;
+    x ^= x >> 30;
+    x = x.wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    x ^= x >> 27;
+    x = x.wrapping_mul(0x94D0_49BB_1331_11EB);
+    x ^= x >> 31;
+    x
+}
+
+/// 从 `base` 起随机挑一个空闲端口:在 [base, base+range) 内从随机起点逐个探测可用性。
+pub fn pick_random_free_port(base: u16, range: u16) -> u16 {
+    let start = (random_seed() % range as u64) as u16;
+    for i in 0..range {
+        let candidate = base + ((start + i) % range);
+        if port_available(candidate) {
+            return candidate;
+        }
+    }
+    base
+}
+
 // ---------------------------------------------------------------------------
 // 配置生成 / 进程托管
 // ---------------------------------------------------------------------------
@@ -278,11 +326,54 @@ fn write_native_config() -> Result<PathBuf, String> {
     Ok(gateway_native_config_file())
 }
 
+/// 扫描进程列表,返回命令行含 `needle` 的进程 PID(ps -A -o pid=,command=;排除自身)。
+/// ps 的 pid 列右对齐带前导空格,须按空白整体切分。
+fn process_pids_matching(needle: &str) -> Vec<u32> {
+    let Ok(output) = std::process::Command::new("ps")
+        .args(["-A", "-o", "pid=,command="])
+        .output()
+    else {
+        return vec![];
+    };
+    let text = String::from_utf8_lossy(&output.stdout);
+    let self_pid = std::process::id();
+    text.lines()
+        .filter_map(|line| {
+            let mut parts = line.split_whitespace();
+            let pid = parts.next()?.parse::<u32>().ok()?;
+            if pid == self_pid {
+                return None;
+            }
+            let cmd = parts.collect::<Vec<&str>>().join(" ");
+            cmd.contains(needle).then_some(pid)
+        })
+        .collect()
+}
+
+/// 当前网关二进制绝对路径(进程识别的标记)。
+fn gateway_bin_marker() -> Option<String> {
+    let bin = locate_gateway()?;
+    let path = bin.to_string_lossy();
+    if path.is_empty() {
+        return None;
+    }
+    Some(path.into_owned())
+}
+
+/// 网关进程是否存活:优先看当前进程托管的子进程;若句柄丢失(wb-switch 重启后网关成孤儿
+/// 进程仍占端口),按网关二进制路径扫描进程列表兜底识别,避免误报「未运行」导致重复启动。
 fn process_alive() -> bool {
     let mut guard = GATEWAY_PROC.lock().unwrap();
-    guard
+    if guard
         .as_mut()
         .is_some_and(|c| c.try_wait().map(|s| s.is_none()).unwrap_or(false))
+    {
+        return true;
+    }
+    drop(guard);
+    gateway_bin_marker()
+        .map(|marker| !process_pids_matching(&marker).is_empty())
+        .unwrap_or(false)
 }
 
 /// 健康检查:`GET /healthz`,校验 `service=="workbuddy2api"`(防假启动)。
@@ -314,6 +405,10 @@ pub async fn start_gateway() -> Result<Value, String> {
     }
     let config_path = write_native_config()?;
     std::fs::create_dir_all(gateway_auth_dir()).map_err(|e| format!("创建 auths 目录失败: {e}"))?;
+    // 预创建 state 目录,保证 state_file 路径就绪(wb2api 落盘时自建,这里提前建好)。
+    if let Some(parent) = gateway_state_file().parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建 state 目录失败: {e}"))?;
+    }
     // 启动前先同步一次账号,让网关池有凭证。
     crate::modules::account_sync::sync_now();
     let child = Command::new(&bin)
@@ -340,21 +435,35 @@ pub async fn start_gateway() -> Result<Value, String> {
     Err("网关进程已启动但健康检查失败(/healthz service 不符)".to_string())
 }
 
-/// 停止网关:杀子进程(Windows 尽力 taskkill 子树防孤儿)。
+/// 停止网关:杀托管的子进程(Windows 尽力 taskkill 子树防孤儿),并兜底杀按二进制
+/// 路径识别到的孤儿网关进程(wb-switch 重启后未被托管的残留)。
 pub fn stop_gateway() -> Result<Value, String> {
-    let mut guard = GATEWAY_PROC.lock().unwrap();
-    let Some(mut child) = guard.take() else {
-        return Ok(json!({ "ok": true, "running": false }));
-    };
-    #[cfg(windows)]
     {
-        let _ = Command::new("taskkill").args(["/F", "/T", "/PID", &child.id().to_string()]).status();
+        let mut guard = GATEWAY_PROC.lock().unwrap();
+        if let Some(mut child) = guard.take() {
+            #[cfg(windows)]
+            {
+                let _ = Command::new("taskkill").args(["/F", "/T", "/PID", &child.id().to_string()]).status();
+            }
+            #[cfg(not(windows))]
+            {
+                let _ = child.kill();
+            }
+            let _ = child.wait();
+        }
     }
-    #[cfg(not(windows))]
-    {
-        let _ = child.kill();
+    if let Some(marker) = gateway_bin_marker() {
+        for pid in process_pids_matching(&marker) {
+            #[cfg(windows)]
+            {
+                let _ = Command::new("taskkill").args(["/F", "/PID", &pid.to_string()]).status();
+            }
+            #[cfg(not(windows))]
+            {
+                let _ = std::process::Command::new("kill").arg(pid.to_string()).status();
+            }
+        }
     }
-    let _ = child.wait();
     Ok(json!({ "ok": true, "running": false }))
 }
 
@@ -376,7 +485,9 @@ pub async fn gateway_status() -> Value {
         "healthy": healthy,
         "version": version,
         "port": port,
+        "port_available": port_available(port),
         "bin": locate_gateway().map(|p| p.to_string_lossy().to_string()),
+        "auth_dir": gateway_auth_dir().to_string_lossy(),
         "config": load_gateway_config(),
     })
 }
@@ -497,6 +608,17 @@ pub async fn apply_gateway_update(sha256: Option<&str>) -> Result<Value, String>
         return Err("未配置 artifact.source_url".to_string());
     }
     let tag = fetch_latest_tag(&src).await.ok_or("无法解析远端最新版本(releases.atom)")?;
+    // 已记录版本与远端一致且二进制在位时不重复下载覆盖(升级只在有新版本时生效)。
+    let installed = cfg_artifact_version();
+    let bin_path = gateway_bin_dir().join("wb2api");
+    if !installed.is_empty() && installed == tag && bin_path.exists() {
+        return Ok(json!({
+            "ok": true,
+            "skipped": true,
+            "version": tag,
+            "bin": bin_path.to_string_lossy(),
+        }));
+    }
     let url = format!("{}/download/{tag}/{}", src.trim_end_matches('/'), platform_asset());
     let resp = reqwest::get(&url).await.map_err(|e| format!("下载失败: {e}"))?;
     if !resp.status().is_success() {
@@ -524,6 +646,7 @@ pub async fn apply_gateway_update(sha256: Option<&str>) -> Result<Value, String>
 
     let target = gateway_bin_dir().join("wb2api");
     let tmp = gateway_bin_dir().join("wb2api.new");
+    std::fs::create_dir_all(gateway_bin_dir()).map_err(|e| format!("创建网关目录失败: {e}"))?;
     std::fs::write(&tmp, &bytes).map_err(|e| format!("写临时文件失败: {e}"))?;
     std::fs::rename(&tmp, &target).map_err(|e| format!("替换二进制失败: {e}"))?;
     #[cfg(unix)]
@@ -618,6 +741,15 @@ mod tests {
     fn pick_free_port_finds_an_available_one() {
         let p = pick_free_port(58000);
         assert!(port_available(p), "挑出的端口应空闲");
+    }
+
+    #[test]
+    fn pick_random_free_port_finds_an_available_one_in_range() {
+        for _ in 0..5 {
+            let p = pick_random_free_port(7863, 100);
+            assert!((7863..7963).contains(&p), "应在 7863 起的 100 个端口范围内,实际 {p}");
+            assert!(port_available(p), "随机挑出的端口应探测为空闲");
+        }
     }
 
     #[test]

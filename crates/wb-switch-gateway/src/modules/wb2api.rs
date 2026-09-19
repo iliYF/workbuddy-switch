@@ -209,6 +209,12 @@ fn parse_pool_auth(text: &str) -> Option<Value> {
             entry["deviceToken"] = json!(dt);
         }
     }
+    // 透出 auth 文件里的分层选号依据(网关写入的积分/到期信息),缺失不影响解析。
+    if let Some(credit) = root.get("credit") {
+        if credit.is_object() {
+            entry["credit"] = credit.clone();
+        }
+    }
     Some(entry)
 }
 

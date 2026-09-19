@@ -93,8 +93,14 @@ export const wb2api = {
       "/api/wb2api/sync/now",
       {},
     ),
-  /** 自动挑选空闲端口。 */
+  /** 自动挑选空闲端口(从 7863 起随机探测)。 */
   gatewayPickPort: () => wb2apiFetch<{ port: number }>("POST", "/api/wb2api/gateway/pick-port", {}),
+  /** 探测某端口是否可绑定(服务端口可用性指示)。 */
+  gatewayPortCheck: (port: number) =>
+    wb2apiFetch<{ port: number; available: boolean }>(
+      "GET",
+      `/api/wb2api/gateway/port-check?port=${encodeURIComponent(port)}`,
+    ),
   /** 网关独立升级:检查更新源。 */
   gatewayCheckUpdate: () =>
     wb2apiFetch<GatewayUpdateCheck>("GET", "/api/wb2api/gateway/update/check"),

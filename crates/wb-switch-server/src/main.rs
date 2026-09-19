@@ -77,10 +77,14 @@ fn spawn_background_loops() {
     // webui 没有 Tauri 事件通道，因此不需要推送回调（桌面端见 src-tauri/src/lib.rs）。
     wb_switch_core::modules::rate_limit_events::spawn_watcher(|| {});
 
-    // 账号单向推送：30s 巡检账号库指纹，变化则导出到网关 auths（网关 5s 热加载）。
+    // 账号单向推送:按配置间隔(sync_interval_seconds)巡检账号库指纹,变化则导出到网关 auths
+    // (网关 5s 热加载)。未开启自动入池时跳过指纹比对与写盘(避免空转),仅按间隔醒来检查开关。
     tokio::spawn(async move {
         loop {
-            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(account_sync::sync_interval_seconds())).await;
+            if !account_sync::auto_sync_enabled() {
+                continue;
+            }
             let _ = account_sync::sync_if_changed();
         }
     });

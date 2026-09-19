@@ -1,12 +1,25 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent } from "react";
-import { RefreshCw, Server, ArrowLeftRight, Trash2, Plug } from "lucide-react";
+import {
+  RefreshCw,
+  Server,
+  ArrowLeftRight,
+  Trash2,
+  Plug,
+  Shuffle,
+  UserRound,
+  Square,
+  Play,
+  Loader2,
+  Zap,
+  Copy,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -35,6 +48,7 @@ import type {
   Wb2apiStats,
 } from "@/lib/types";
 import { useAccountsStore } from "@/stores/accounts";
+import { cn } from "@/lib/utils";
 
 function StatusBadge({ state }: { state: Wb2apiPoolAccounts["accounts"][number]["pool"] }) {
   if (!state) return <Badge variant="secondary">未在池中</Badge>;
@@ -44,23 +58,77 @@ function StatusBadge({ state }: { state: Wb2apiPoolAccounts["accounts"][number][
   return <Badge>正常</Badge>;
 }
 
-function SummaryCards({ summary }: { summary: Wb2apiPoolSummary | null }) {
-  const items = [
-    { label: "总数", value: summary?.total ?? "-" },
-    { label: "健康", value: summary?.healthy ?? "-" },
-    { label: "冷却", value: summary?.cooling ?? "-" },
-    { label: "禁用", value: summary?.disabled ?? "-" },
-  ];
+/** 小节:卡片外的小标题 + Card(flex-1 让同栅格行等高)。 */
+function Section({
+  title,
+  description,
+  children,
+  className,
+}: {
+  title: string;
+  description?: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-      {items.map((item) => (
-        <Card key={item.label} className="min-w-0 gap-0 overflow-hidden rounded-xl py-0 shadow-none">
-          <CardContent className="min-w-0 px-4 py-4 text-center">
-            <div className="text-2xl font-semibold tabular-nums">{item.value}</div>
-            <div className="text-xs text-muted-foreground">{item.label}</div>
-          </CardContent>
-        </Card>
-      ))}
+    <section className={cn("flex min-w-0 flex-col space-y-2.5", className)}>
+      <div className="px-1">
+        <h2 className="text-[13px] font-medium leading-5">{title}</h2>
+        {description ? <p className="mt-0.5 text-xs text-muted-foreground">{description}</p> : null}
+      </div>
+      <Card className="min-w-0 flex-1 gap-0 overflow-hidden rounded-xl py-0 shadow-none">{children}</Card>
+    </section>
+  );
+}
+
+/** 卡片内的设置/状态行(border-b 分隔,末行无边框)。 */
+function Row({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <div
+      className={cn(
+        "mx-4 flex min-w-0 flex-wrap items-center justify-between gap-3 border-b border-border/50 py-2.5 last:border-b-0 sm:mx-5",
+        className,
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** 状态小方块(label + 值 + 可选色调)。 */
+function Stat({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: React.ReactNode;
+  tone?: "ok" | "warn" | "off";
+}) {
+  return (
+    <div className="min-w-0 rounded-lg border border-border/60 px-3 py-2">
+      <div className="text-[11px] text-muted-foreground">{label}</div>
+      <div
+        className={cn(
+          "mt-0.5 truncate text-[15px] font-medium tabular-nums",
+          tone === "ok" && "text-emerald-600 dark:text-emerald-400",
+          tone === "warn" && "text-amber-600 dark:text-amber-400",
+          tone === "off" && "text-muted-foreground",
+        )}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function SummaryStats({ summary }: { summary: Wb2apiPoolSummary | null }) {
+  return (
+    <div className="mx-4 grid grid-cols-2 gap-2 py-3 sm:mx-5 sm:grid-cols-4">
+      <Stat label="总数" value={summary?.total ?? "—"} />
+      <Stat label="健康" value={summary?.healthy ?? "—"} tone={(summary?.healthy ?? 0) > 0 ? "ok" : "warn"} />
+      <Stat label="冷却 / 禁用" value={`${summary?.cooling ?? 0} / ${summary?.disabled ?? 0}`} tone="warn" />
+      <Stat label="粘性会话" value={summary?.sticky_sessions ?? 0} />
     </div>
   );
 }
@@ -436,20 +504,22 @@ export default function GatewayPage() {
   }, [oauthOpen, reconcileAccounts]);
 
   return (
-    <div className="mx-auto w-full max-w-[1180px] min-w-0 px-4 py-6 sm:px-8 sm:py-9">
-      <header className="mb-6 flex min-w-0 flex-wrap items-start justify-between gap-4">
+    <div className="mx-auto w-full max-w-[1800px] space-y-6 px-5 py-6 sm:px-8 sm:py-8">
+      <header className="flex min-w-0 items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-[28px] font-semibold tracking-tight">网关管理</h1>
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
+          <h1 className="flex items-center gap-2 text-lg font-medium leading-6">
+            <Server className="size-4.5 shrink-0" /> 网关管理
+          </h1>
+          <p className="mt-1 text-xs text-muted-foreground">
             对接 workbuddy2api:纳管账号入池、查看池状态与用量、维护配置。
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => setConnOpen(true)}>
-            <Plug className="size-4" /> 接入配置
+        <div className="flex shrink-0 items-center gap-1">
+          <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setConnOpen(true)}>
+            <Plug className="size-3.5" /> 接入配置
           </Button>
-          <Button variant="outline" size="sm" onClick={() => void loadAll()} disabled={loading}>
-            <RefreshCw className={`size-4 ${loading ? "animate-spin" : ""}`} /> 刷新
+          <Button variant="ghost" size="icon" className="shrink-0" onClick={() => void loadAll()} disabled={loading} aria-label="刷新">
+            <RefreshCw className={cn("size-4", loading && "animate-spin")} />
           </Button>
         </div>
       </header>
@@ -562,20 +632,15 @@ export default function GatewayPage() {
           <TabsTrigger value="config">配置</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="pool" className="space-y-4">
+        <TabsContent value="pool" className="space-y-6">
           {configured ? (
             <>
-              <SummaryCards summary={summary} />
+              <Section title="账号池概览" description="状态每 20 秒自动刷新">
+                <SummaryStats summary={summary} />
+              </Section>
 
-              <Card className="min-w-0 gap-0 overflow-hidden rounded-xl py-0 shadow-none">
-                <CardHeader className="border-b px-4 py-3 sm:px-5">
-                  <CardTitle>纳管账号</CardTitle>
-                  <CardDescription>
-                    把本地账号库的账号推入网关池(写入 auths 目录,5s 热加载)。
-                    与桌面切换共用同一批腾讯账号。
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="min-w-0 px-4 pt-3 pb-4 sm:px-5 space-y-3">
+              <Section title="纳管账号" description="把本地账号库的账号推入网关池(写入 auths 目录,5s 热加载)">
+                <div className="min-w-0 px-4 pt-3 pb-4 sm:px-5">
                   <div className="flex flex-wrap items-end gap-3">
                     <div className="min-w-[220px] flex-1 space-y-1.5">
                       <Label>选择本地账号</Label>
@@ -632,19 +697,18 @@ export default function GatewayPage() {
                       </div>
                     )}
                   </div>
-                </CardContent>
-              </Card>
+                </div>
+              </Section>
 
-              <Card className="min-w-0 gap-0 overflow-hidden rounded-xl py-0 shadow-none">
-                <CardHeader className="border-b px-4 py-3 sm:px-5">
-                  <CardTitle>池账号</CardTitle>
-                  <CardDescription>
-                    {pool?.configured
-                      ? `${pool.accounts.length} 个凭证文件;状态来自 /status`
-                      : "未配置 authDir,仅显示池状态"}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="min-w-0 px-4 pt-3 pb-4 sm:px-5">
+              <Section
+                title="池账号"
+                description={
+                  pool?.configured
+                    ? `${pool.accounts.length} 个凭证文件;状态来自 /status`
+                    : "未配置 authDir,仅显示池状态"
+                }
+              >
+                <div className="min-w-0 px-4 pt-3 pb-4 sm:px-5">
                   {loading && !pool ? (
                     <Skeleton className="h-24 w-full" />
                   ) : pool && pool.accounts.length === 0 ? (
@@ -701,26 +765,23 @@ export default function GatewayPage() {
                       </TableBody>
                     </Table>
                   )}
-                </CardContent>
-              </Card>
+                </div>
+              </Section>
             </>
           ) : null}
         </TabsContent>
 
-        <TabsContent value="stats" className="space-y-4">
+        <TabsContent value="stats" className="space-y-6">
           {configured ? (
             <>
-              <SummaryCards summary={summary} />
-              <Card className="min-w-0 gap-0 overflow-hidden rounded-xl py-0 shadow-none">
-                <CardHeader className="border-b px-4 py-3 sm:px-5">
-                  <CardTitle>模型中心</CardTitle>
-                  <CardDescription>
-                    共 {modelSummary.total} 个 · 推理 {modelSummary.reasoning} · 大上下文(≥128K){" "}
-                    {modelSummary.large} · 最大上下文 {modelSummary.maxCtx.toLocaleString()} · 来源{" "}
-                    {catalogSource}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="min-w-0 px-4 pt-3 pb-4 sm:px-5 space-y-4">
+              <Section title="账号池概览" description="状态每 20 秒自动刷新">
+                <SummaryStats summary={summary} />
+              </Section>
+              <Section
+                title="模型中心"
+                description={`共 ${modelSummary.total} 个 · 推理 ${modelSummary.reasoning} · 大上下文(≥128K) ${modelSummary.large} · 最大上下文 ${modelSummary.maxCtx.toLocaleString()} · 来源 ${catalogSource}`}
+              >
+                <div className="min-w-0 px-4 pt-3 pb-4 sm:px-5 space-y-4">
                   {models.length === 0 ? (
                     <p className="text-sm text-muted-foreground">暂无模型(可能无健康账号或拉取失败)。</p>
                   ) : (
@@ -792,14 +853,10 @@ export default function GatewayPage() {
                       )}
                     </>
                   )}
-                </CardContent>
-              </Card>
-              <Card className="min-w-0 gap-0 overflow-hidden rounded-xl py-0 shadow-none">
-                <CardHeader className="border-b px-4 py-3 sm:px-5">
-                  <CardTitle>请求统计</CardTitle>
-                  <CardDescription>来自 /v1/stats(进程内计数,重启清零)</CardDescription>
-                </CardHeader>
-                <CardContent className="min-w-0 px-4 pt-3 pb-4 sm:px-5">
+                </div>
+              </Section>
+              <Section title="请求统计" description="来自 /v1/stats(进程内计数,重启清零)">
+                <div className="min-w-0 px-4 pt-3 pb-4 sm:px-5">
                   {!stats || stats.models.length === 0 ? (
                     <p className="text-sm text-muted-foreground">暂无统计。</p>
                   ) : (
@@ -830,54 +887,44 @@ export default function GatewayPage() {
                       </TableBody>
                     </Table>
                   )}
-                </CardContent>
-              </Card>
+                </div>
+              </Section>
             </>
           ) : null}
         </TabsContent>
 
-        <TabsContent value="config" className="space-y-4">
-          <Card className="min-w-0 gap-0 overflow-hidden rounded-xl py-0 shadow-none">
-            <CardHeader className="border-b px-4 py-3 sm:px-5">
-              <CardTitle>对接配置</CardTitle>
-              <CardDescription>存于 ~/.wbh/wb2api.json(workbuddy-hub 数据根)</CardDescription>
-            </CardHeader>
-            <CardContent className="min-w-0 px-4 pt-3 pb-4 sm:px-5 space-y-3">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-1.5">
-                  <Label>baseUrl</Label>
-                  <Input value={form?.baseUrl ?? ""} onChange={set("baseUrl")} placeholder="http://127.0.0.1:54321" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>apiKey</Label>
-                  <Input value={form?.apiKey ?? ""} onChange={set("apiKey")} placeholder="留空=不鉴权" type="password" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>authDir</Label>
-                  <Input value={form?.authDir ?? ""} onChange={set("authDir")} placeholder="wb2api 部署的 auths/ 绝对路径" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>configPath(可选)</Label>
-                  <Input value={form?.configPath ?? ""} onChange={set("configPath")} placeholder="wb2api 的 config.json 路径" />
-                </div>
+        <TabsContent value="config" className="space-y-6">
+          <Section title="对接配置" description="存于 ~/.wbh/wb2api.json">
+            <div className="grid min-w-0 gap-3 px-4 pt-3 pb-4 sm:grid-cols-2 sm:px-5">
+              <div className="space-y-1.5">
+                <Label>baseUrl</Label>
+                <Input value={form?.baseUrl ?? ""} onChange={set("baseUrl")} placeholder="http://127.0.0.1:54321" />
               </div>
-              <div className="flex items-center gap-2">
+              <div className="space-y-1.5">
+                <Label>apiKey</Label>
+                <Input value={form?.apiKey ?? ""} onChange={set("apiKey")} placeholder="留空=不鉴权" type="password" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>authDir</Label>
+                <Input value={form?.authDir ?? ""} onChange={set("authDir")} placeholder="wb2api 部署的 auths/ 绝对路径" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>configPath(可选)</Label>
+                <Input value={form?.configPath ?? ""} onChange={set("configPath")} placeholder="wb2api 的 config.json 路径" />
+              </div>
+              <div className="sm:col-span-2">
                 <Button onClick={() => void handleSaveConfig()} disabled={savingConfig || !form}>
                   {savingConfig ? "保存中…" : "保存对接配置"}
                 </Button>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </Section>
 
-          <Card className="min-w-0 gap-0 overflow-hidden rounded-xl py-0 shadow-none">
-            <CardHeader className="border-b px-4 py-3 sm:px-5">
-              <CardTitle>上游 config.json</CardTitle>
-              <CardDescription>
-                直接编辑 wb2api 的 config.json(仅本机可用;保存前自动备份为 .bak,需先配置 configPath)。
-                改 admin.enabled / global.enabled / cooldown 等需重启 wb2api 生效。
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="min-w-0 px-4 pt-3 pb-4 sm:px-5 space-y-3">
+          <Section
+            title="上游 config.json"
+            description="直接编辑 wb2api 的 config.json(仅本机可用;保存前自动备份为 .bak,需先配置 configPath)。改 admin/global/cooldown 等需重启 wb2api 生效"
+          >
+            <div className="min-w-0 space-y-3 px-4 pt-3 pb-4 sm:px-5">
               <div className="flex items-center gap-2">
                 <Button variant="outline" size="sm" onClick={() => void handleLoadUpstream()} disabled={loadingUpstream}>
                   {loadingUpstream ? "读取中…" : "读取 config.json"}
@@ -894,88 +941,107 @@ export default function GatewayPage() {
               <Button onClick={() => void handleSaveUpstream()} disabled={savingUpstream || !upstreamText}>
                 {savingUpstream ? "保存中…" : "保存 config.json"}
               </Button>
-            </CardContent>
-          </Card>
+            </div>
+          </Section>
         </TabsContent>
 
-        <TabsContent value="gateway" className="space-y-4">
-          <Card className="min-w-0 gap-0 overflow-hidden rounded-xl py-0 shadow-none">
-            <CardHeader className="border-b px-4 py-3 sm:px-5">
-              <CardTitle>网关运行状态</CardTitle>
-              <CardDescription>托管独立的 workbuddy2api 二进制;启动/停止即时生效,健康经 /healthz 校验。</CardDescription>
-            </CardHeader>
-            <CardContent className="min-w-0 px-4 pt-3 pb-4 sm:px-5 space-y-4">
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="space-y-1">
-                  <Label>运行状态</Label>
-                  <div>
-                    <Badge variant={gw?.running ? (gw.healthy ? "default" : "destructive") : "secondary"}>
-                      {gw?.running ? (gw.healthy ? "运行中" : "运行但不健康") : "未运行"}
-                    </Badge>
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <Label>健康</Label>
-                  <div>
-                    <Badge variant={gw?.healthy ? "default" : "outline"}>{gw?.healthy ? "健康" : "—"}</Badge>
-                  </div>
-                </div>
-                <div className="space-y-1">
-                  <Label>端口</Label>
-                  <div className="text-sm font-mono">{gw?.port ?? gwForm?.port ?? 54321}</div>
-                </div>
-                <div className="space-y-1">
-                  <Label>二进制</Label>
-                  <div className="truncate text-xs text-muted-foreground">{gw?.bin ?? "未定位"}</div>
-                </div>
+        <TabsContent value="gateway" className="space-y-6">
+          <div className="grid min-w-0 gap-6 xl:grid-cols-2">
+            <Section title="运行状态" description="账号池状态每 20 秒自动刷新">
+              <div className="mx-4 grid grid-cols-2 gap-2 py-3 sm:mx-5 sm:grid-cols-4">
+                <Stat
+                  label="服务"
+                  value={gw?.running ? (gw.healthy ? "运行中" : "已启动") : "未运行"}
+                  tone={gw?.running ? "ok" : "off"}
+                />
+                <Stat label="健康" value={gw?.healthy ? "健康" : "—"} tone={gw?.healthy ? "ok" : "warn"} />
+                <Stat label="端口" value={gw?.port ?? gwForm?.port ?? 54321} />
+                <Stat label="二进制" value={gw?.bin ? "已定位" : "未定位"} tone={gw?.bin ? "ok" : "warn"} />
               </div>
-              <div className="flex flex-wrap gap-2">
-                <Button onClick={() => void handleGwStart()} disabled={gwBusy || gw?.running}>
-                  {gwBusy ? "处理中…" : "启动网关"}
-                </Button>
-                <Button variant="outline" onClick={() => void handleGwStop()} disabled={gwBusy || !gw?.running}>
-                  停止网关
-                </Button>
-                <Button variant="outline" onClick={() => void handleGwSync()} disabled={gwBusy}>
-                  立即同步账号
-                </Button>
-              </div>
-              {syncResult && <p className="text-sm text-muted-foreground">{syncResult}</p>}
-            </CardContent>
-          </Card>
 
-          <Card className="min-w-0 gap-0 overflow-hidden rounded-xl py-0 shadow-none">
-            <CardHeader className="border-b px-4 py-3 sm:px-5">
-              <CardTitle>工作模式与端口</CardTitle>
-              <CardDescription>负载均衡使用全部入池账号;指定账号则只走所选账号(从账号池选择)。</CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-3 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label>工作模式</Label>
-                <Select
-                  value={gwForm?.mode ?? "balance"}
-                  onValueChange={(v) => setGwForm((f) => (f ? { ...f, mode: v as GatewayConfig["mode"] } : f))}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="balance">负载均衡(账号池)</SelectItem>
-                    <SelectItem value="pinned">指定账号</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              {gwForm?.mode === "pinned" && (
-                <div className="space-y-1.5">
-                  <Label>指定账号(从账号池选择)</Label>
-                  <Select
-                    value={gwForm?.pinned_uid ?? undefined}
-                    onValueChange={(v) => setGwForm((f) => (f ? { ...f, pinned_uid: v } : f))}
+              <Row>
+                <div className="min-w-0">
+                  <div className="text-[13px]">OpenAI 兼容接口</div>
+                  <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">{connBaseUrlV1}</div>
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <Button variant="ghost" size="icon" className="size-7" onClick={() => void copyText(connBaseUrlV1, "接口地址")} aria-label="复制接口地址">
+                    <Copy className="size-3.5" />
+                  </Button>
+                  {gw?.running ? (
+                    <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs" onClick={() => void handleGwStop()} disabled={gwBusy}>
+                      {gwBusy ? <Loader2 className="size-3.5 animate-spin" /> : <Square className="size-3.5" />}
+                      停止
+                    </Button>
+                  ) : (
+                    <Button size="sm" className="h-7 gap-1.5 text-xs" onClick={() => void handleGwStart()} disabled={gwBusy}>
+                      {gwBusy ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
+                      启动网关
+                    </Button>
+                  )}
+                </div>
+              </Row>
+
+              <Row>
+                <div className="min-w-0">
+                  <div className="text-[13px]">账号同步</div>
+                  <div className="mt-0.5 text-[11px] text-muted-foreground">
+                    {gwForm?.sync_enabled ? "自动同步已开启(仅勾选账号)" : "自动同步已关闭(默认)"} · 手动纳管不受影响
+                  </div>
+                </div>
+                <Button variant="outline" size="sm" className="h-7 shrink-0 gap-1.5 text-xs" onClick={() => void handleGwSync()} disabled={gwBusy}>
+                  <Zap className="size-3.5" />
+                  立即同步
+                </Button>
+              </Row>
+              {syncResult && <div className="mx-4 pb-3 text-[11px] text-muted-foreground sm:mx-5">{syncResult}</div>}
+            </Section>
+
+            <Section title="接口配置" description="工作模式、端口与访问密钥(保存后生效)">
+              <Row className="flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+                <div className="min-w-0">
+                  <div className="text-[13px]">工作模式</div>
+                  <div className="mt-0.5 text-[11px] text-muted-foreground">
+                    {gwForm?.mode === "pinned" ? "只使用下方指定的这一个账号" : "使用全部入池账号,负载均衡分摊"}
+                  </div>
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <Button
+                    variant={gwForm?.mode === "balance" ? "default" : "outline"}
+                    size="sm"
+                    className="h-8 gap-1.5 px-2.5 text-xs"
+                    onClick={() => setGwForm((f) => (f ? { ...f, mode: "balance" } : f))}
                   >
-                    <SelectTrigger>
-                      <SelectValue placeholder="选择账号" />
+                    <Shuffle className="size-3.5" /> 负载均衡
+                  </Button>
+                  <Button
+                    variant={gwForm?.mode === "pinned" ? "default" : "outline"}
+                    size="sm"
+                    className="h-8 gap-1.5 px-2.5 text-xs"
+                    onClick={() => setGwForm((f) => (f ? { ...f, mode: "pinned" } : f))}
+                  >
+                    <UserRound className="size-3.5" /> 指定账号
+                  </Button>
+                </div>
+              </Row>
+
+              {gwForm?.mode === "pinned" && (
+                <Row className="flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+                  <div className="min-w-0">
+                    <Label className="text-[13px] font-normal">使用账号</Label>
+                    <div className="mt-0.5 text-[11px] text-muted-foreground">
+                      {localAccounts.length ? `共 ${localAccounts.length} 个账号可选` : "账号库为空"}
+                    </div>
+                  </div>
+                  <Select
+                    value={gwForm?.pinned_uid ?? "__none__"}
+                    onValueChange={(v) => setGwForm((f) => (f ? { ...f, pinned_uid: v === "__none__" ? null : v } : f))}
+                  >
+                    <SelectTrigger size="sm" className="w-44 shrink-0">
+                      <SelectValue placeholder="(未选择)" />
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="__none__">(未选择)</SelectItem>
                       {localAccounts.filter((a) => a.uid).map((acc) => (
                         <SelectItem key={acc.id} value={acc.uid!}>
                           {acc.nickname || acc.email || acc.uid}
@@ -983,26 +1049,24 @@ export default function GatewayPage() {
                       ))}
                     </SelectContent>
                   </Select>
-                </div>
+                </Row>
               )}
-              <div className="space-y-1.5 sm:col-span-2">
-                <Label>端口(预设/自由设置)</Label>
-                <div className="flex items-center gap-2">
+
+              <Row className="flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+                <div className="min-w-0">
+                  <div className="text-[13px]">端口</div>
+                  <div className="mt-0.5 text-[11px] text-muted-foreground">预设或自由设置,被占用时可「自动」选空闲</div>
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5">
                   <Input
                     type="number"
-                    className="w-28"
+                    className="h-8 w-24 text-xs"
                     value={gwForm?.port ?? 54321}
-                    onChange={(e) =>
-                      setGwForm((f) => (f ? { ...f, port: Number(e.target.value) || 54321 } : f))
-                    }
+                    onChange={(e) => setGwForm((f) => (f ? { ...f, port: Number(e.target.value) || 54321 } : f))}
                   />
-                  <Select
-                    onValueChange={(v) =>
-                      setGwForm((f) => (f ? { ...f, port: Number(v) } : f))
-                    }
-                  >
-                    <SelectTrigger className="w-32">
-                      <SelectValue placeholder="预设端口" />
+                  <Select onValueChange={(v) => setGwForm((f) => (f ? { ...f, port: Number(v) } : f))}>
+                    <SelectTrigger size="sm" className="w-28">
+                      <SelectValue placeholder="预设" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="54321">54321(默认)</SelectItem>
@@ -1011,73 +1075,74 @@ export default function GatewayPage() {
                       <SelectItem value="54320">54320</SelectItem>
                     </SelectContent>
                   </Select>
-                  <Button size="sm" variant="outline" onClick={() => void handleGwPickPort()}>
+                  <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => void handleGwPickPort()}>
                     自动
                   </Button>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
+              </Row>
 
-          <Card className="min-w-0 gap-0 overflow-hidden rounded-xl py-0 shadow-none">
-            <CardHeader className="border-b px-4 py-3 sm:px-5">
-              <CardTitle>基本配置</CardTitle>
-              <CardDescription>密钥、二进制路径、升级源、随 App 启动、自动同步入池。</CardDescription>
-            </CardHeader>
-            <CardContent className="min-w-0 px-4 pt-3 pb-4 sm:px-5 space-y-3">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-1.5">
-                  <Label>api_key(留空=不鉴权)</Label>
-                  <Input value={gwForm?.api_key ?? ""} onChange={setGwField("api_key")} type="password" placeholder="留空=不鉴权" />
+              <Row className="flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+                <div className="min-w-0">
+                  <div className="text-[13px]">访问密钥 api_key</div>
+                  <div className="mt-0.5 text-[11px] text-muted-foreground">留空 = 不鉴权</div>
                 </div>
-                <div className="space-y-1.5">
-                  <Label>bin_path(留空自动找 ~/.wbh/gateway/bin)</Label>
-                  <Input value={gwForm?.bin_path ?? ""} onChange={setGwField("bin_path")} placeholder="/path/to/wb2api" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>升级源 update_source(二进制 URL 或本地路径)</Label>
-                  <Input value={gwForm?.update_source ?? ""} onChange={setGwField("update_source")} placeholder="https://…/wb2api 或 /path/to/wb2api" />
-                </div>
-                <div className="flex items-end gap-4">
-                  <label className="flex items-center gap-2 text-sm">
-                    <Switch
-                      checked={gwForm?.auto_start ?? false}
-                      onCheckedChange={(v) => setGwForm((f) => (f ? { ...f, auto_start: v } : f))}
-                    />
-                    随 App 启动
-                  </label>
-                  <label className="flex items-center gap-2 text-sm">
-                    <Switch
-                      checked={gwForm?.sync_enabled ?? false}
-                      onCheckedChange={(v) => setGwForm((f) => (f ? { ...f, sync_enabled: v } : f))}
-                    />
-                    自动同步勾选账号入池(默认关)
-                  </label>
+                <Input
+                  value={gwForm?.api_key ?? ""}
+                  onChange={setGwField("api_key")}
+                  type="password"
+                  placeholder="留空=不鉴权"
+                  className="h-8 w-full text-xs sm:w-64 sm:shrink-0"
+                />
+              </Row>
+            </Section>
+          </div>
+
+          <Section title="高级配置" description="二进制路径、独立升级、随 App 启动与自动同步">
+            <Row>
+              <div className="min-w-0">
+                <div className="text-[13px]">网关二进制路径</div>
+                <div className="mt-0.5 text-[11px] text-muted-foreground">留空自动查找 ~/.wbh/gateway/bin</div>
+              </div>
+              <Input value={gwForm?.bin_path ?? ""} onChange={setGwField("bin_path")} placeholder="/path/to/wb2api" className="h-8 w-full text-xs sm:w-80 sm:shrink-0" />
+            </Row>
+            <Row>
+              <div className="min-w-0">
+                <div className="text-[13px]">升级源 update_source</div>
+                <div className="mt-0.5 text-[11px] text-muted-foreground">二进制 URL 或本地路径;与客户端升级解耦</div>
+              </div>
+              <div className="flex shrink-0 items-center gap-1.5">
+                <Input value={gwForm?.update_source ?? ""} onChange={setGwField("update_source")} placeholder="https://…/wb2api 或 /path/to/wb2api" className="h-8 w-full text-xs sm:w-64" />
+                <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => void handleGwCheckUpdate()} disabled={gwUpdating}>
+                  检查
+                </Button>
+                <Button size="sm" className="h-8 text-xs" onClick={() => void handleGwApplyUpdate()} disabled={gwUpdating}>
+                  更新
+                </Button>
+              </div>
+            </Row>
+            {gwUpdateMsg && <div className="mx-4 pb-3 text-[11px] text-muted-foreground sm:mx-5">{gwUpdateMsg}</div>}
+            <Row>
+              <div className="min-w-0">
+                <div className="text-[13px]">随 App 启动</div>
+                <div className="mt-0.5 text-[11px] text-muted-foreground">应用启动时自动拉起网关</div>
+              </div>
+              <Switch checked={gwForm?.auto_start ?? false} onCheckedChange={(v) => setGwForm((f) => (f ? { ...f, auto_start: v } : f))} />
+            </Row>
+            <Row>
+              <div className="min-w-0">
+                <div className="text-[13px]">自动同步勾选账号入池</div>
+                <div className="mt-0.5 text-[11px] text-muted-foreground">
+                  默认关闭;开启后仅把「池账号」页勾选的账号推入网关 auths,避免主账号被自动加池
                 </div>
               </div>
+              <Switch checked={gwForm?.sync_enabled ?? false} onCheckedChange={(v) => setGwForm((f) => (f ? { ...f, sync_enabled: v } : f))} />
+            </Row>
+            <div className="flex justify-end px-4 py-3 sm:px-5">
               <Button onClick={() => void handleGwSaveConfig()} disabled={!gwForm}>
                 保存网关配置
               </Button>
-            </CardContent>
-          </Card>
-
-          <Card className="min-w-0 gap-0 overflow-hidden rounded-xl py-0 shadow-none">
-            <CardHeader className="border-b px-4 py-3 sm:px-5">
-              <CardTitle>独立升级</CardTitle>
-              <CardDescription>与客户端升级解耦;从 update_source 下载/替换网关二进制,网关在跑则重启。</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <Button size="sm" variant="outline" onClick={() => void handleGwCheckUpdate()} disabled={gwUpdating}>
-                  {gwUpdating ? "处理中…" : "检查更新"}
-                </Button>
-                <Button size="sm" onClick={() => void handleGwApplyUpdate()} disabled={gwUpdating}>
-                  下载并替换(可选 sha256 校验,网关在跑则重启)
-                </Button>
-              </div>
-              {gwUpdateMsg && <p className="text-sm text-muted-foreground">{gwUpdateMsg}</p>}
-            </CardContent>
-          </Card>
+            </div>
+          </Section>
         </TabsContent>
       </Tabs>
 

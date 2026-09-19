@@ -909,103 +909,143 @@ export default function GatewayPage() {
         <TabsContent value="gateway" className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">网关</CardTitle>
-              <CardDescription>
-                状态与启停、基本配置(端口/密钥/工作模式/自动同步)、独立升级。
-              </CardDescription>
+              <CardTitle className="text-base">网关运行状态</CardTitle>
+              <CardDescription>托管独立的 workbuddy2api 二进制;启动/停止即时生效,健康经 /healthz 校验。</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex flex-wrap items-center gap-3">
-                <Badge variant={gw?.running ? (gw.healthy ? "default" : "destructive") : "secondary"}>
-                  {gw?.running ? (gw.healthy ? "运行中" : "运行但不健康") : "未运行"}
-                </Badge>
-                <span className="text-sm text-muted-foreground">端口 {gw?.port ?? gwForm?.port ?? 7863}</span>
-                {gw?.bin && <span className="text-xs text-muted-foreground">{gw.bin}</span>}
-                <div className="ml-auto flex gap-2">
-                  <Button size="sm" variant="outline" onClick={() => void handleGwSync()} disabled={gwBusy}>
-                    立即同步账号
-                  </Button>
-                  <Button size="sm" onClick={() => void handleGwStart()} disabled={gwBusy || gw?.running}>
-                    {gwBusy ? "处理中…" : "启动"}
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={() => void handleGwStop()} disabled={gwBusy || !gw?.running}>
-                    停止
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="space-y-1">
+                  <Label>运行状态</Label>
+                  <div>
+                    <Badge variant={gw?.running ? (gw.healthy ? "default" : "destructive") : "secondary"}>
+                      {gw?.running ? (gw.healthy ? "运行中" : "运行但不健康") : "未运行"}
+                    </Badge>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <Label>健康</Label>
+                  <div>
+                    <Badge variant={gw?.healthy ? "default" : "outline"}>{gw?.healthy ? "健康" : "—"}</Badge>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <Label>端口</Label>
+                  <div className="text-sm font-mono">{gw?.port ?? gwForm?.port ?? 54321}</div>
+                </div>
+                <div className="space-y-1">
+                  <Label>二进制</Label>
+                  <div className="truncate text-xs text-muted-foreground">{gw?.bin ?? "未定位"}</div>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={() => void handleGwStart()} disabled={gwBusy || gw?.running}>
+                  {gwBusy ? "处理中…" : "启动网关"}
+                </Button>
+                <Button variant="outline" onClick={() => void handleGwStop()} disabled={gwBusy || !gw?.running}>
+                  停止网关
+                </Button>
+                <Button variant="outline" onClick={() => void handleGwSync()} disabled={gwBusy}>
+                  立即同步账号
+                </Button>
+              </div>
+              {syncResult && <p className="text-sm text-muted-foreground">{syncResult}</p>}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">工作模式与端口</CardTitle>
+              <CardDescription>负载均衡使用全部入池账号;指定账号则只走所选账号(从账号池选择)。</CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label>工作模式</Label>
+                <Select
+                  value={gwForm?.mode ?? "balance"}
+                  onValueChange={(v) => setGwForm((f) => (f ? { ...f, mode: v as GatewayConfig["mode"] } : f))}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="balance">负载均衡(账号池)</SelectItem>
+                    <SelectItem value="pinned">指定账号</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {gwForm?.mode === "pinned" && (
+                <div className="space-y-1.5">
+                  <Label>指定账号(从账号池选择)</Label>
+                  <Select
+                    value={gwForm?.pinned_uid ?? undefined}
+                    onValueChange={(v) => setGwForm((f) => (f ? { ...f, pinned_uid: v } : f))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="选择账号" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {localAccounts.filter((a) => a.uid).map((acc) => (
+                        <SelectItem key={acc.id} value={acc.uid!}>
+                          {acc.nickname || acc.email || acc.uid}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label>端口(预设/自由设置)</Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    className="w-28"
+                    value={gwForm?.port ?? 54321}
+                    onChange={(e) =>
+                      setGwForm((f) => (f ? { ...f, port: Number(e.target.value) || 54321 } : f))
+                    }
+                  />
+                  <Select
+                    onValueChange={(v) =>
+                      setGwForm((f) => (f ? { ...f, port: Number(v) } : f))
+                    }
+                  >
+                    <SelectTrigger className="w-32">
+                      <SelectValue placeholder="预设端口" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="54321">54321(默认)</SelectItem>
+                      <SelectItem value="7863">7863</SelectItem>
+                      <SelectItem value="17863">17863</SelectItem>
+                      <SelectItem value="54320">54320</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button size="sm" variant="outline" onClick={() => void handleGwPickPort()}>
+                    自动
                   </Button>
                 </div>
               </div>
-              {syncResult && <p className="text-sm text-muted-foreground">{syncResult}</p>}
+            </CardContent>
+          </Card>
 
-              <Separator />
-
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">基本配置</CardTitle>
+              <CardDescription>密钥、二进制路径、升级源、随 App 启动、自动同步入池。</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
               <div className="grid gap-3 sm:grid-cols-2">
-                <div className="space-y-1.5">
-                  <Label>bin_path(留空自动找 ~/.wbh/gateway/bin)</Label>
-                  <Input value={gwForm?.bin_path ?? ""} onChange={setGwField("bin_path")} placeholder="/path/to/wb2api" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>端口(预设/自由设置)</Label>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      type="number"
-                      className="w-28"
-                      value={gwForm?.port ?? 54321}
-                      onChange={(e) =>
-                        setGwForm((f) => (f ? { ...f, port: Number(e.target.value) || 54321 } : f))
-                      }
-                    />
-                    <Select
-                      onValueChange={(v) =>
-                        setGwForm((f) => (f ? { ...f, port: Number(v) } : f))
-                      }
-                    >
-                      <SelectTrigger className="w-32">
-                        <SelectValue placeholder="预设端口" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="54321">54321(默认)</SelectItem>
-                        <SelectItem value="7863">7863</SelectItem>
-                        <SelectItem value="17863">17863</SelectItem>
-                        <SelectItem value="54320">54320</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Button size="sm" variant="outline" onClick={() => void handleGwPickPort()}>
-                      自动
-                    </Button>
-                  </div>
-                </div>
                 <div className="space-y-1.5">
                   <Label>api_key(留空=不鉴权)</Label>
                   <Input value={gwForm?.api_key ?? ""} onChange={setGwField("api_key")} type="password" placeholder="留空=不鉴权" />
                 </div>
                 <div className="space-y-1.5">
+                  <Label>bin_path(留空自动找 ~/.wbh/gateway/bin)</Label>
+                  <Input value={gwForm?.bin_path ?? ""} onChange={setGwField("bin_path")} placeholder="/path/to/wb2api" />
+                </div>
+                <div className="space-y-1.5">
                   <Label>升级源 update_source(二进制 URL 或本地路径)</Label>
                   <Input value={gwForm?.update_source ?? ""} onChange={setGwField("update_source")} placeholder="https://…/wb2api 或 /path/to/wb2api" />
                 </div>
-                <div className="space-y-1.5">
-                  <Label>工作模式</Label>
-                  <Select
-                    value={gwForm?.mode ?? "balance"}
-                    onValueChange={(v) => setGwForm((f) => (f ? { ...f, mode: v as GatewayConfig["mode"] } : f))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="balance">负载均衡</SelectItem>
-                      <SelectItem value="pinned">指定账号</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                {gwForm?.mode === "pinned" && (
-                  <div className="space-y-1.5">
-                    <Label>指定账号 uid</Label>
-                    <Input
-                      value={gwForm?.pinned_uid ?? ""}
-                      onChange={(e) => setGwForm((f) => (f ? { ...f, pinned_uid: e.target.value } : f))}
-                      placeholder="账号 uid"
-                    />
-                  </div>
-                )}
                 <div className="flex items-end gap-4">
                   <label className="flex items-center gap-2 text-sm">
                     <Switch
@@ -1023,25 +1063,27 @@ export default function GatewayPage() {
                   </label>
                 </div>
               </div>
-
-              <Separator />
-
-              <div className="space-y-2">
-                <div className="font-medium text-sm">网关独立升级(与客户端升级解耦)</div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button size="sm" variant="outline" onClick={() => void handleGwCheckUpdate()} disabled={gwUpdating}>
-                    {gwUpdating ? "处理中…" : "检查更新"}
-                  </Button>
-                  <Button size="sm" onClick={() => void handleGwApplyUpdate()} disabled={gwUpdating}>
-                    下载并替换(可选 sha256 校验,网关在跑则重启)
-                  </Button>
-                </div>
-                {gwUpdateMsg && <p className="text-sm text-muted-foreground">{gwUpdateMsg}</p>}
-              </div>
-
               <Button onClick={() => void handleGwSaveConfig()} disabled={!gwForm}>
                 保存网关配置
               </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">独立升级</CardTitle>
+              <CardDescription>与客户端升级解耦;从 update_source 下载/替换网关二进制,网关在跑则重启。</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <Button size="sm" variant="outline" onClick={() => void handleGwCheckUpdate()} disabled={gwUpdating}>
+                  {gwUpdating ? "处理中…" : "检查更新"}
+                </Button>
+                <Button size="sm" onClick={() => void handleGwApplyUpdate()} disabled={gwUpdating}>
+                  下载并替换(可选 sha256 校验,网关在跑则重启)
+                </Button>
+              </div>
+              {gwUpdateMsg && <p className="text-sm text-muted-foreground">{gwUpdateMsg}</p>}
             </CardContent>
           </Card>
         </TabsContent>

@@ -22,7 +22,7 @@ use wb_switch_core::modules::{
     rate_limit_hook, refresh, rotate, session, switch, token_stats, travel, update,
     variant::WbVariant,
 };
-use wb_switch_gateway::{gateway_manage, wb2api};
+use wb_switch_gateway::{account_sync, gateway_manage, wb2api};
 
 /// WorkBuddy 运行状态缓存：Windows 上检测要跑 tasklist（慢），缓存几秒避免
 /// 前端切 tab 频繁触发命令行导致卡顿/闪窗。按档位分别缓存。
@@ -156,6 +156,8 @@ pub fn router() -> Router {
             "/api/wb2api/gateway/config",
             get(api_gateway_config_get).post(api_gateway_config_save),
         )
+        // 账号单向推送
+        .route("/api/wb2api/sync/now", post(api_sync_now))
         .route(
             "/api/wb2api/accounts/:uid/disable",
             post(api_wb2api_account_disable),
@@ -905,6 +907,11 @@ async fn api_gateway_config_save(Json(body): Json<Value>) -> Response {
         Ok(()) => json_ok(gateway_manage::load_gateway_config()),
         Err(e) => json_err(e.to_string(), StatusCode::BAD_REQUEST),
     }
+}
+
+/// 账号单向推送:立即把账号库导出到网关 auths(手动触发)。
+async fn api_sync_now() -> Response {
+    json_ok(account_sync::sync_now())
 }
 
 async fn api_wb2api_account_disable(Path(uid): Path<String>, Json(body): Json<Value>) -> Response {

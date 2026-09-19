@@ -720,4 +720,11 @@ export const wb2api = {
   gatewayStop: () => wb2apiFetch<{ ok: boolean; running: boolean }>("POST", "/api/wb2api/gateway/stop", {}),
   gatewaySaveConfig: (config: Partial<GatewayConfig>) =>
     wb2apiFetch<GatewayConfig>("POST", "/api/wb2api/gateway/config", { config }),
+  /** 账号单向推送:立即把账号库导出到网关 auths。 */
+  gatewaySyncNow: () =>
+    wb2apiFetch<{ exported: number; removed: number; accounts: number; error?: string }>(
+      "POST",
+      "/api/wb2api/sync/now",
+      {},
+    ),
 };

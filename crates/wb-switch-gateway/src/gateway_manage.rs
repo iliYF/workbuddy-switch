@@ -203,6 +203,8 @@ pub async fn start_gateway() -> Result<Value, String> {
     }
     let config_path = write_native_config()?;
     std::fs::create_dir_all(gateway_auth_dir()).map_err(|e| format!("创建 auths 目录失败: {e}"))?;
+    // 启动前先同步一次账号,让网关池有凭证。
+    crate::account_sync::sync_now();
     let child = Command::new(&bin)
         .arg("-config")
         .arg(&config_path)

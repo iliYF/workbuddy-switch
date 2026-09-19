@@ -5,7 +5,9 @@
 //!
 //! - [`wb2api`]:对接 workbuddy2api 的 HTTP 客户端 + 同机 auths/config 文件访问。
 //! - [`gateway_manage`]:网关托管(二进制定位/起停/健康/端口/配置)。
-//! - (后续)`account_sync` / `agent_import`:账号单向推送 / 智能体接入。
+//! - [`account_sync`]:账号单向推送(账号库 → 网关 auths)。
+//! - (后续)`agent_import`:智能体接入。
 
+pub mod account_sync;
 pub mod gateway_manage;
 pub mod wb2api;

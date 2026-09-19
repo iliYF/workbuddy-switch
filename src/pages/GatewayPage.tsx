@@ -268,6 +268,25 @@ export default function GatewayPage() {
     }
   }
 
+  const [syncResult, setSyncResult] = useState("");
+
+  async function handleGwSync() {
+    setGwBusy(true);
+    try {
+      const res = await api.wb2api.gatewaySyncNow();
+      setSyncResult(
+        res.error
+          ? `同步失败: ${res.error}`
+          : `已导出 ${res.exported} 个、清理 ${res.removed} 个(共 ${res.accounts} 个账号)`,
+      );
+      toast.success("账号已同步到网关 auths");
+    } catch (e) {
+      toast.error("同步失败", { description: asError(e) });
+    } finally {
+      setGwBusy(false);
+    }
+  }
+
   const setGwField = (key: keyof GatewayConfig) => (e: ChangeEvent<HTMLInputElement>) =>
     setGwForm((f) => (f ? { ...f, [key]: e.target.value } : f));
 
@@ -820,6 +839,9 @@ export default function GatewayPage() {
                 <span className="text-sm text-muted-foreground">端口 {gw?.port ?? gwForm?.port ?? 7863}</span>
                 {gw?.bin && <span className="text-xs text-muted-foreground">{gw.bin}</span>}
                 <div className="ml-auto flex gap-2">
+                  <Button size="sm" variant="outline" onClick={() => void handleGwSync()} disabled={gwBusy}>
+                    立即同步账号
+                  </Button>
                   <Button size="sm" onClick={() => void handleGwStart()} disabled={gwBusy || gw?.running}>
                     {gwBusy ? "处理中…" : "启动"}
                   </Button>
@@ -828,6 +850,7 @@ export default function GatewayPage() {
                   </Button>
                 </div>
               </div>
+              {syncResult && <p className="text-sm text-muted-foreground">{syncResult}</p>}
 
               <Separator />
 

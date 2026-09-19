@@ -653,6 +653,28 @@ export interface Wb2apiModelCatalog {
   realm: string;
 }
 
+/** 网关托管配置(`~/.wbh/gateway.json`)。 */
+export interface GatewayConfig {
+  enabled: boolean;
+  /** wb2api 二进制路径;空则从 ~/.wbh/gateway/bin 查找。 */
+  bin_path: string;
+  port: number;
+  api_key: string;
+  /** 负载均衡 / 指定账号(后者由账号单向推送据此只导出 pinned_uid)。 */
+  mode: "balance" | "pinned";
+  pinned_uid: string | null;
+  auto_start: boolean;
+}
+
+/** 网关托管状态:进程/健康/端口/二进制 + 当前配置。 */
+export interface GatewayStatus {
+  running: boolean;
+  healthy: boolean;
+  port: number;
+  bin?: string | null;
+  config: GatewayConfig;
+}
+
 /** admin 端点响应体。 */
 export interface Wb2apiAdminState {
   uid: string;

@@ -22,7 +22,7 @@ use wb_switch_core::modules::{
     rate_limit_hook, refresh, rotate, session, switch, token_stats, travel, update,
     variant::WbVariant,
 };
-use wb_switch_gateway::wb2api;
+use wb_switch_gateway::{gateway_manage, wb2api};
 
 /// WorkBuddy 运行状态缓存：Windows 上检测要跑 tasklist（慢），缓存几秒避免
 /// 前端切 tab 频繁触发命令行导致卡顿/闪窗。按档位分别缓存。
@@ -148,6 +148,14 @@ pub fn router() -> Router {
         .route("/api/wb2api/stats", get(api_wb2api_stats))
         .route("/api/wb2api/pool-accounts", get(api_wb2api_pool_accounts))
         .route("/api/wb2api/model-catalog", get(api_wb2api_model_catalog))
+        // 网关托管(gateway_manage)
+        .route("/api/wb2api/gateway", get(api_gateway_status))
+        .route("/api/wb2api/gateway/start", post(api_gateway_start))
+        .route("/api/wb2api/gateway/stop", post(api_gateway_stop))
+        .route(
+            "/api/wb2api/gateway/config",
+            get(api_gateway_config_get).post(api_gateway_config_save),
+        )
         .route(
             "/api/wb2api/accounts/:uid/disable",
             post(api_wb2api_account_disable),
@@ -860,6 +868,43 @@ async fn api_wb2api_model_catalog(RawQuery(query): RawQuery) -> Response {
         })
         .unwrap_or("cn");
     json_ok(wb2api::model_catalog(WbVariant::parse(Some(realm))).await)
+}
+
+// ---------------------------------------------------------------------------
+// 网关托管(gateway_manage)
+// ---------------------------------------------------------------------------
+
+/// 网关托管状态(进程/健康/端口/配置)。
+async fn api_gateway_status() -> Response {
+    json_ok(gateway_manage::gateway_status().await)
+}
+
+async fn api_gateway_start() -> Response {
+    match gateway_manage::start_gateway().await {
+        Ok(v) => json_ok(v),
+        Err(e) => json_err(e, StatusCode::BAD_REQUEST),
+    }
+}
+
+async fn api_gateway_stop() -> Response {
+    match gateway_manage::stop_gateway() {
+        Ok(v) => json_ok(v),
+        Err(e) => json_err(e, StatusCode::BAD_REQUEST),
+    }
+}
+
+/// 网关托管配置(读)。
+async fn api_gateway_config_get() -> Response {
+    json_ok(gateway_manage::load_gateway_config())
+}
+
+/// 网关托管配置(存)。
+async fn api_gateway_config_save(Json(body): Json<Value>) -> Response {
+    let submitted = body.get("config").unwrap_or(&body);
+    match gateway_manage::save_gateway_config(submitted) {
+        Ok(()) => json_ok(gateway_manage::load_gateway_config()),
+        Err(e) => json_err(e.to_string(), StatusCode::BAD_REQUEST),
+    }
 }
 
 async fn api_wb2api_account_disable(Path(uid): Path<String>, Json(body): Json<Value>) -> Response {

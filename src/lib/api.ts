@@ -38,6 +38,8 @@ import type {
   Wb2apiPoolAccounts,
   Wb2apiPoolSummary,
   Wb2apiStats,
+  GatewayConfig,
+  GatewayStatus,
   WbVariant,
 } from "./types";
 import { DEMO_UNAVAILABLE_MESSAGE, demoModeEnabled } from "./demo-mode";
@@ -712,4 +714,10 @@ export const wb2api = {
     ),
   saveUpstreamConfig: (config: Record<string, unknown>) =>
     wb2apiFetch<{ ok: boolean; path: string }>("POST", "/api/wb2api/upstream-config", { config }),
+  // 网关托管
+  gatewayStatus: () => wb2apiFetch<GatewayStatus>("GET", "/api/wb2api/gateway"),
+  gatewayStart: () => wb2apiFetch<{ ok: boolean; running: boolean }>("POST", "/api/wb2api/gateway/start", {}),
+  gatewayStop: () => wb2apiFetch<{ ok: boolean; running: boolean }>("POST", "/api/wb2api/gateway/stop", {}),
+  gatewaySaveConfig: (config: Partial<GatewayConfig>) =>
+    wb2apiFetch<GatewayConfig>("POST", "/api/wb2api/gateway/config", { config }),
 };

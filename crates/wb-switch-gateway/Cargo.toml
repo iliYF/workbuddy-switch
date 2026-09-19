@@ -7,4 +7,4 @@ description = "wb-switch 网关管理(对接 workbuddy2api:托管/同步/模型�
 [dependencies]
 wb-switch-core = { path = "../wb-switch-core" }
 serde_json = "1"
-tokio = { version = "1", features = ["rt", "macros"] }
+tokio = { version = "1", features = ["rt", "macros", "time"] }

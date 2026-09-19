@@ -261,7 +261,11 @@ pub async fn probe_health(port: u16) -> bool {
 /// 启动网关:写配置 → 拉起子进程 → 健康检查重试(最多 5s)。
 pub async fn start_gateway() -> Result<Value, String> {
     if process_alive() {
-        return Ok(json!({ "ok": true, "running": true, "message": "网关已在运行" }));
+        // 进程活着:仍以 healthz 复核;健康则直接返回,不健康则报错(提示重启)。
+        if probe_health(cfg_port()).await {
+            return Ok(json!({ "ok": true, "running": true, "healthy": true, "port": cfg_port() }));
+        }
+        return Err("网关进程在,但 /healthz 不健康;可尝试重启".to_string());
     }
     let bin = locate_gateway().ok_or("未找到网关二进制:请配置 bin_path 或放入 ~/.wbh/gateway/bin")?;
     if !port_available(cfg_port()) {

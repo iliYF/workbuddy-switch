@@ -14,6 +14,9 @@ import {
   Copy,
   Recycle,
   Wand2,
+  Eye,
+  EyeOff,
+  RotateCw,
   Download,
   ExternalLink,
 } from "lucide-react";
@@ -177,6 +180,8 @@ export default function GatewayPage() {
   const [gw, setGw] = useState<GatewayStatus | null>(null);
   const [gwForm, setGwForm] = useState<GatewayConfig | null>(null);
   const [gwBusy, setGwBusy] = useState(false);
+  /** 网关 API Key 是否明文显示(默认隐藏)。 */
+  const [showApiKey, setShowApiKey] = useState(false);
 
   const configured = Boolean(config && (config.authDir || config.baseUrl));
 
@@ -287,6 +292,21 @@ export default function GatewayPage() {
       await refreshGw();
     } catch (e) {
       toast.error("停止失败", { description: asError(e) });
+    } finally {
+      setGwBusy(false);
+    }
+  }
+
+  /** 重启网关:先停(若在跑)再启(复用后端 healthz 健康检测)。 */
+  async function handleGwRestart() {
+    setGwBusy(true);
+    try {
+      await api.wb2api.gatewayStop().catch(() => {});
+      await api.wb2api.gatewayStart();
+      toast.success("网关已重启");
+      await refreshGw();
+    } catch (e) {
+      toast.error("重启失败", { description: asError(e) });
     } finally {
       setGwBusy(false);
     }
@@ -819,10 +839,16 @@ export default function GatewayPage() {
                     <Copy className="size-3.5" />
                   </Button>
                   {gw?.running ? (
-                    <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs" onClick={() => void handleGwStop()} disabled={gwBusy}>
-                      {gwBusy ? <Loader2 className="size-3.5 animate-spin" /> : <Square className="size-3.5" />}
-                      停止
-                    </Button>
+                    <>
+                      <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs" onClick={() => void handleGwRestart()} disabled={gwBusy}>
+                        {gwBusy ? <Loader2 className="size-3.5 animate-spin" /> : <RotateCw className="size-3.5" />}
+                        重启
+                      </Button>
+                      <Button variant="outline" size="sm" className="h-7 gap-1.5 text-xs" onClick={() => void handleGwStop()} disabled={gwBusy}>
+                        {gwBusy ? <Loader2 className="size-3.5 animate-spin" /> : <Square className="size-3.5" />}
+                        停止
+                      </Button>
+                    </>
                   ) : (
                     <Button size="sm" className="h-7 gap-1.5 text-xs" onClick={() => void handleGwStart()} disabled={gwBusy}>
                       {gwBusy ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
@@ -940,8 +966,8 @@ export default function GatewayPage() {
                     value={gwForm?.port ?? 54321}
                     onChange={(e) => setGwForm((f) => (f ? { ...f, port: Number(e.target.value) || 54321 } : f))}
                   />
-                  <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => void handleGwPickPort()}>
-                    生成
+                  <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs" onClick={() => void handleGwPickPort()}>
+                    <Wand2 className="size-3.5" /> 生成
                   </Button>
                 </div>
               </Row>
@@ -952,13 +978,24 @@ export default function GatewayPage() {
                   <div className="mt-0.5 text-[11px] text-muted-foreground">用于客户端接入鉴权(wbs- 前缀);可一键生成</div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1.5">
-                  <Input
-                    value={gwForm?.api_key ?? ""}
-                    onChange={setGwField("api_key")}
-                    type="text"
-                    placeholder="点击生成"
-                    className="h-8 w-full font-mono text-xs sm:w-64"
-                  />
+                  <div className="relative">
+                    <Input
+                      value={gwForm?.api_key ?? ""}
+                      onChange={setGwField("api_key")}
+                      type={showApiKey ? "text" : "password"}
+                      placeholder="点击生成"
+                      className="h-8 w-full pr-8 font-mono text-xs sm:w-64"
+                    />
+                    <button
+                      type="button"
+                      className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      onClick={() => setShowApiKey((s) => !s)}
+                      aria-label={showApiKey ? "隐藏" : "显示"}
+                      title={showApiKey ? "隐藏" : "显示"}
+                    >
+                      {showApiKey ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                    </button>
+                  </div>
                   <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs" onClick={() => void handleGenKey()}>
                     <Wand2 className="size-3.5" /> 生成
                   </Button>

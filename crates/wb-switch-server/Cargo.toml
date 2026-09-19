@@ -10,6 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 wb-switch-core = { path = "../wb-switch-core" }
+wb-switch-gateway = { path = "../wb-switch-gateway" }
 axum = "0.7"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
 serde_json = "1"

@@ -21,8 +21,8 @@ use wb_switch_core::modules::{
     credit_usage, credits, export_import, limits, oauth, process, rate_limit_events,
     rate_limit_hook, refresh, rotate, session, switch, token_stats, travel, update,
     variant::WbVariant,
-    wb2api,
 };
+use wb_switch_gateway::wb2api;
 
 /// WorkBuddy 运行状态缓存：Windows 上检测要跑 tasklist（慢），缓存几秒避免
 /// 前端切 tab 频繁触发命令行导致卡顿/闪窗。按档位分别缓存。

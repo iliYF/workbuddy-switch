@@ -158,6 +158,7 @@ pub fn router() -> Router {
         )
         .route("/api/wb2api/gateway/update/check", get(api_gateway_update_check))
         .route("/api/wb2api/gateway/update", post(api_gateway_update_apply))
+        .route("/api/wb2api/gateway/pick-port", post(api_gateway_pick_port))
         // 账号单向推送
         .route("/api/wb2api/sync/now", post(api_sync_now))
         .route(
@@ -928,6 +929,11 @@ async fn api_gateway_update_apply(Json(body): Json<Value>) -> Response {
         Ok(v) => json_ok(v),
         Err(e) => json_err(e, StatusCode::BAD_REQUEST),
     }
+}
+
+/// 自动挑选一个空闲端口(从 54321 起)。
+async fn api_gateway_pick_port() -> Response {
+    json_ok(json!({ "port": gateway_manage::pick_free_port(54321) }))
 }
 
 async fn api_wb2api_account_disable(Path(uid): Path<String>, Json(body): Json<Value>) -> Response {

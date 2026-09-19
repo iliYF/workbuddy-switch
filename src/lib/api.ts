@@ -52,7 +52,7 @@ import { screenshotDemoResponse } from "./screenshot-demo";
  * - 桌面 App（Tauri）：`invoke` 调用 Rust commands
  * - webui（浏览器）：HTTP fetch 调用本地 workbuddy-switch 服务（127.0.0.1）
  */
-const API_BASE = "http://127.0.0.1:57890";
+const API_BASE = "http://127.0.0.1:54320";
 
 const DEMO_READ_COMMANDS = new Set([
   "get_status", "get_accounts", "get_codebuddy_cli_status", "get_codebuddy_cn_ide_status", "get_codebuddy_ide_status", "get_checkin_status",
@@ -735,4 +735,6 @@ export const wb2api = {
   /** 网关独立升级:下载并替换二进制(可选 sha256),网关在跑则重启。 */
   gatewayApplyUpdate: (sha256?: string) =>
     wb2apiFetch<GatewayUpdateResult>("POST", "/api/wb2api/gateway/update", { sha256 }),
+  /** 自动挑选空闲端口。 */
+  gatewayPickPort: () => wb2apiFetch<{ port: number }>("POST", "/api/wb2api/gateway/pick-port", {}),
 };

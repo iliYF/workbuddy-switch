@@ -321,6 +321,30 @@ export default function GatewayPage() {
     }
   }
 
+  async function handleGwPickPort() {
+    try {
+      const r = await api.wb2api.gatewayPickPort();
+      setGwForm((f) => (f ? { ...f, port: r.port } : f));
+      toast.success(`已选空闲端口 ${r.port}`);
+    } catch (e) {
+      toast.error("选端口失败", { description: asError(e) });
+    }
+  }
+
+  /** 勾选/取消某账号入网关池(持久化到 gateway.json pool_uids)。 */
+  async function togglePoolUid(uid: string) {
+    if (!gwForm || !uid) return;
+    const cur = gwForm.pool_uids ?? [];
+    const next = cur.includes(uid) ? cur.filter((u) => u !== uid) : [...cur, uid];
+    try {
+      const saved = await api.wb2api.gatewaySaveConfig({ ...gwForm, pool_uids: next });
+      setGwForm(saved);
+      toast.success(next.includes(uid) ? "已加入网关池选择" : "已移出网关池选择");
+    } catch (e) {
+      toast.error("保存失败", { description: asError(e) });
+    }
+  }
+
   const setGwField = (key: keyof GatewayConfig) => (e: ChangeEvent<HTMLInputElement>) =>
     setGwForm((f) => (f ? { ...f, [key]: e.target.value } : f));
 
@@ -590,6 +614,31 @@ export default function GatewayPage() {
                     <Button variant="outline" onClick={() => setOauthOpen(true)}>
                       <ArrowLeftRight className="size-4" /> 扫码新增账号
                     </Button>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>
+                      自动同步入池的账号(需在「托管」开启自动同步;未勾选不会被自动加入网关池,避免主账号风险)
+                    </Label>
+                    {localAccounts.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">本地账号库为空,请先扫码添加</p>
+                    ) : (
+                      <div className="grid gap-1.5 sm:grid-cols-2">
+                        {localAccounts.map((acc) => {
+                          const uid = acc.uid ?? "";
+                          const checked = (gwForm?.pool_uids ?? []).includes(uid);
+                          return (
+                            <label key={acc.id} className="flex items-center gap-2 text-sm">
+                              <Switch
+                                checked={checked}
+                                onCheckedChange={() => void togglePoolUid(uid)}
+                                disabled={!uid}
+                              />
+                              {acc.nickname || acc.email || acc.uid || acc.id}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -894,14 +943,35 @@ export default function GatewayPage() {
                   <Input value={gwForm?.bin_path ?? ""} onChange={setGwField("bin_path")} placeholder="/path/to/wb2api" />
                 </div>
                 <div className="space-y-1.5">
-                  <Label>端口</Label>
-                  <Input
-                    type="number"
-                    value={gwForm?.port ?? 7863}
-                    onChange={(e) =>
-                      setGwForm((f) => (f ? { ...f, port: Number(e.target.value) || 7863 } : f))
-                    }
-                  />
+                  <Label>端口(预设/自由设置)</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      className="w-28"
+                      value={gwForm?.port ?? 54321}
+                      onChange={(e) =>
+                        setGwForm((f) => (f ? { ...f, port: Number(e.target.value) || 54321 } : f))
+                      }
+                    />
+                    <Select
+                      onValueChange={(v) =>
+                        setGwForm((f) => (f ? { ...f, port: Number(v) } : f))
+                      }
+                    >
+                      <SelectTrigger className="w-32">
+                        <SelectValue placeholder="预设端口" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="54321">54321(默认)</SelectItem>
+                        <SelectItem value="7863">7863</SelectItem>
+                        <SelectItem value="17863">17863</SelectItem>
+                        <SelectItem value="54320">54320</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Button size="sm" variant="outline" onClick={() => void handleGwPickPort()}>
+                      自动
+                    </Button>
+                  </div>
                 </div>
                 <div className="space-y-1.5">
                   <Label>api_key(留空=不鉴权)</Label>
@@ -936,13 +1006,20 @@ export default function GatewayPage() {
                     />
                   </div>
                 )}
-                <div className="flex items-end">
+                <div className="flex items-end gap-4">
                   <label className="flex items-center gap-2 text-sm">
                     <Switch
                       checked={gwForm?.auto_start ?? false}
                       onCheckedChange={(v) => setGwForm((f) => (f ? { ...f, auto_start: v } : f))}
                     />
                     随 App 启动
+                  </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    <Switch
+                      checked={gwForm?.sync_enabled ?? false}
+                      onCheckedChange={(v) => setGwForm((f) => (f ? { ...f, sync_enabled: v } : f))}
+                    />
+                    自动同步勾选账号入池(默认关)
                   </label>
                 </div>
               </div>

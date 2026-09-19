@@ -666,6 +666,10 @@ export interface GatewayConfig {
   auto_start: boolean;
   /** 网关独立升级源:二进制 URL 或本地文件路径。 */
   update_source: string;
+  /** 自动同步开关(默认关):开启后才把 pool_uids 里勾选的账号推入网关池。 */
+  sync_enabled: boolean;
+  /** 用户勾选入池的账号 uid 集合。 */
+  pool_uids: string[];
 }
 
 /** 网关升级检查结果。 */

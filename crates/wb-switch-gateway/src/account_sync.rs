@@ -61,7 +61,7 @@ fn build_auth_doc(acc: &Value, existing: Option<&Value>) -> Value {
     doc
 }
 
-/// 导出集合指纹:账号库导出相关字段的稳定哈希,用于增量判断。
+/// 导出集合指纹:账号库导出相关字段 + 网关同步配置(sync_enabled / pool_uids)的稳定哈希。
 fn accounts_fingerprint(accounts: &[Value]) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     for acc in accounts {
@@ -69,6 +69,9 @@ fn accounts_fingerprint(accounts: &[Value]) -> u64 {
             acc.get(key).hash(&mut hasher);
         }
     }
+    let gw = load_gateway_config();
+    gw.get("sync_enabled").hash(&mut hasher);
+    gw.get("pool_uids").hash(&mut hasher);
     hasher.finish()
 }
 
@@ -84,11 +87,28 @@ fn save_fingerprint(fp: u64) -> std::io::Result<()> {
     atomic_write(&sync_state_file(), &content)
 }
 
-/// 导出账号库到网关 auths(按托管配置 mode 过滤,只导出指定账号时取 pinned_uid),并清理残留。
+/// 导出账号库到网关 auths(只导出**用户勾选入池**的账号;sync_enabled 关闭则不导出)。
+/// 按托管配置:mode=pinned 且 pinned_uid 非空时只导出该 uid;否则导出 pool_uids 交集。
+/// 导出时保留既有 `credit` 块(分层选号依据)。清理残留仅在启用同步时进行。
 pub fn export_accounts_to_auths() -> Result<Value, String> {
     let gw = load_gateway_config();
+    let sync_enabled = gw.get("sync_enabled").and_then(Value::as_bool).unwrap_or(false);
+    if !sync_enabled {
+        return Ok(json!({
+            "disabled": true,
+            "exported": 0,
+            "removed": 0,
+            "message": "自动同步未开启,账号需手动纳管",
+        }));
+    }
     let mode = gw.get("mode").and_then(Value::as_str).unwrap_or("balance");
     let pinned = gw.get("pinned_uid").and_then(Value::as_str).unwrap_or("");
+    // 用户勾选入池的账号(pool_uids);pinned 模式进一步收窄到 pinned_uid。
+    let pool_uids: HashSet<String> = gw
+        .get("pool_uids")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+        .unwrap_or_default();
     let dir = gateway_auth_dir();
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
 
@@ -105,6 +125,9 @@ pub fn export_accounts_to_auths() -> Result<Value, String> {
         }
         if mode == "pinned" && !pinned.is_empty() && uid != pinned {
             continue; // 指定账号模式只导出 pinned_uid
+        }
+        if !pool_uids.is_empty() && !pool_uids.contains(&uid) {
+            continue; // 只导出用户勾选入池的账号;pool_uids 为空视为未选择,不导出
         }
         wanted_uids.insert(uid.clone());
         let path = dir.join(format!("workbuddy-{uid}.json"));

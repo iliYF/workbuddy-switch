@@ -27,7 +27,7 @@ pub fn wb2api_config_file() -> PathBuf {
 
 pub fn default_wb2api_config() -> Value {
     json!({
-        "baseUrl": "http://127.0.0.1:7863",
+        "baseUrl": "http://127.0.0.1:54321",
         "apiKey": "",
         "authDir": "",
         "configPath": "",
@@ -748,7 +748,7 @@ mod tests {
         let defaults = default_wb2api_config();
         assert_eq!(
             defaults.get("baseUrl").and_then(Value::as_str),
-            Some("http://127.0.0.1:7863")
+            Some("http://127.0.0.1:54321")
         );
         assert_eq!(defaults.get("apiKey").and_then(Value::as_str), Some(""));
 

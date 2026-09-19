@@ -45,12 +45,14 @@ pub fn default_gateway_config() -> Value {
     json!({
         "enabled": false,
         "bin_path": "",
-        "port": 7863,
+        "port": 54321,
         "api_key": "",
         "mode": "balance",
         "pinned_uid": null,
         "auto_start": false,
         "update_source": "",
+        "sync_enabled": false,
+        "pool_uids": [],
     })
 }
 
@@ -69,10 +71,14 @@ fn merge_gateway_config(input: &Value) -> Value {
                 merged["port"] = json!(v);
             }
         }
-        for key in ["enabled", "auto_start"] {
+        for key in ["enabled", "auto_start", "sync_enabled"] {
             if let Some(v) = map.get(key).and_then(Value::as_bool) {
                 merged[key] = json!(v);
             }
+        }
+        if let Some(v) = map.get("pool_uids").and_then(Value::as_array) {
+            let uids: Vec<&str> = v.iter().filter_map(Value::as_str).collect();
+            merged["pool_uids"] = json!(uids);
         }
         if let Some(v) = map.get("pinned_uid").cloned() {
             if !v.is_null() {
@@ -115,7 +121,7 @@ fn cfg_port() -> u16 {
     load_gateway_config()
         .get("port")
         .and_then(Value::as_i64)
-        .unwrap_or(7863)
+        .unwrap_or(54321)
         .clamp(1, 65535) as u16
 }
 
@@ -368,27 +374,36 @@ mod tests {
     #[test]
     fn gateway_config_defaults_and_keeps_known_fields() {
         let defaults = default_gateway_config();
-        assert_eq!(defaults.get("port").and_then(Value::as_i64), Some(7863));
+        assert_eq!(defaults.get("port").and_then(Value::as_i64), Some(54321));
         assert_eq!(defaults.get("mode").and_then(Value::as_str), Some("balance"));
         assert_eq!(defaults.get("enabled").and_then(Value::as_bool), Some(false));
+        assert_eq!(
+            defaults.get("sync_enabled").and_then(Value::as_bool),
+            Some(false),
+            "自动同步默认关闭"
+        );
 
         let merged = merge_gateway_config(&json!({
             "port": 9000,
             "api_key": "k",
             "mode": "pinned",
             "pinned_uid": "u-1",
+            "sync_enabled": true,
+            "pool_uids": ["u-1", "u-2"],
             "unknown": 1,
         }));
         assert_eq!(merged.get("port").and_then(Value::as_i64), Some(9000));
         assert_eq!(merged.get("mode").and_then(Value::as_str), Some("pinned"));
         assert_eq!(merged.get("pinned_uid").and_then(Value::as_str), Some("u-1"));
+        assert_eq!(merged.get("sync_enabled").and_then(Value::as_bool), Some(true));
+        assert_eq!(merged.get("pool_uids"), Some(&json!(["u-1", "u-2"])));
         assert!(merged.get("unknown").is_none());
     }
 
     #[test]
     fn gateway_config_rejects_bad_port() {
         let merged = merge_gateway_config(&json!({ "port": 99999 }));
-        assert_eq!(merged.get("port").and_then(Value::as_i64), Some(7863), "越界端口保持默认");
+        assert_eq!(merged.get("port").and_then(Value::as_i64), Some(54321), "越界端口保持默认");
     }
 
     #[test]

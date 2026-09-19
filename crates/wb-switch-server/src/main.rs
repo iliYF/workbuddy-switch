@@ -17,7 +17,7 @@ use wb_switch_core::modules::{
 use wb_switch_gateway::account_sync;
 
 fn default_port() -> u16 {
-    57890
+    54320
 }
 
 /// 后台任务：自动签到启动即核验、每 30 分钟补签；自动轮换按配置间隔执行；

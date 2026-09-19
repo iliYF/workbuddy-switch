@@ -49,21 +49,39 @@ pub fn default_gateway_config() -> Value {
         "api_key": "",
         "mode": "balance",
         "pinned_uid": null,
+        // 积分轮转模式下的当前活跃账号(由 hub 巡检轮转维护)。
+        "rotation_uid": null,
         "auto_start": false,
         "update_source": "",
+        // 自动入池:开启后本地账号库的账号自动进入网关池(仍需不在 no_sync_uids)。
         "sync_enabled": false,
+        // 手动入池:显式勾选要入池的账号(自动入池关闭时是唯一来源)。
         "pool_uids": [],
+        // 永不入池:无论自动/手动都不导出(如主账号,避免风控)。
+        "no_sync_uids": [],
     })
+}
+
+/// 生成访问密钥:`wbs-` 前缀 + 32 位十六进制随机。
+pub fn generate_api_key() -> String {
+    format!("wbs-{}", uuid::Uuid::new_v4().simple())
 }
 
 fn merge_gateway_config(input: &Value) -> Value {
     let mut merged = default_gateway_config();
     if let Some(map) = input.as_object() {
-        for key in ["bin_path", "api_key", "mode", "update_source"] {
+        for key in ["bin_path", "api_key", "update_source"] {
             if let Some(v) = map.get(key).and_then(Value::as_str) {
                 if !v.trim().is_empty() {
                     merged[key] = json!(v.trim());
                 }
+            }
+        }
+        // mode 限定三值,非法回落 balance。
+        if let Some(v) = map.get("mode").and_then(Value::as_str) {
+            let m = v.trim();
+            if matches!(m, "balance" | "rotation" | "pinned") {
+                merged["mode"] = json!(m);
             }
         }
         if let Some(v) = map.get("port").and_then(Value::as_i64) {
@@ -76,13 +94,17 @@ fn merge_gateway_config(input: &Value) -> Value {
                 merged[key] = json!(v);
             }
         }
-        if let Some(v) = map.get("pool_uids").and_then(Value::as_array) {
-            let uids: Vec<&str> = v.iter().filter_map(Value::as_str).collect();
-            merged["pool_uids"] = json!(uids);
+        for key in ["pool_uids", "no_sync_uids"] {
+            if let Some(v) = map.get(key).and_then(Value::as_array) {
+                let uids: Vec<&str> = v.iter().filter_map(Value::as_str).collect();
+                merged[key] = json!(uids);
+            }
         }
-        if let Some(v) = map.get("pinned_uid").cloned() {
-            if !v.is_null() {
-                merged["pinned_uid"] = v;
+        for key in ["pinned_uid", "rotation_uid"] {
+            if let Some(v) = map.get(key).cloned() {
+                if !v.is_null() {
+                    merged[key] = v;
+                }
             }
         }
     }
@@ -101,11 +123,30 @@ pub fn load_gateway_config() -> Value {
     default_gateway_config()
 }
 
+/// 保存托管配置,并从端口/密钥派生出 wb2api 对接配置(baseUrl/apiKey/authDir)。
+///
+/// 网关页只让用户填一次(端口 + API Key);hub 连网关所需的对接信息由这里自动
+/// 写入 `~/.wbh/wb2api.json`,避免两处重复填写。
 pub fn save_gateway_config(cfg: &Value) -> std::io::Result<()> {
     let merged = merge_gateway_config(cfg);
     std::fs::create_dir_all(wbh_dir())?;
     let content = serde_json::to_string_pretty(&merged).unwrap_or_default();
-    atomic_write(&gateway_config_file(), &content)
+    atomic_write(&gateway_config_file(), &content)?;
+    write_derived_wb2api_config(&merged);
+    Ok(())
+}
+
+/// 把网关配置派生进 wb2api 对接配置(端口→baseUrl,api_key→apiKey,凭证目录→authDir)。
+fn write_derived_wb2api_config(gw: &Value) {
+    let port = gw.get("port").and_then(Value::as_i64).unwrap_or(54321);
+    let api_key = gw.get("api_key").and_then(Value::as_str).unwrap_or("");
+    let derived = json!({
+        "baseUrl": format!("http://127.0.0.1:{port}"),
+        "apiKey": api_key,
+        "authDir": gateway_auth_dir().to_string_lossy(),
+        "configPath": gateway_native_config_file().to_string_lossy(),
+    });
+    let _ = crate::wb2api::save_wb2api_config(&derived);
 }
 
 fn cfg_str(key: &str) -> String {
@@ -380,24 +421,41 @@ mod tests {
         assert_eq!(
             defaults.get("sync_enabled").and_then(Value::as_bool),
             Some(false),
-            "自动同步默认关闭"
+            "自动入池默认关闭"
         );
 
         let merged = merge_gateway_config(&json!({
             "port": 9000,
-            "api_key": "k",
-            "mode": "pinned",
-            "pinned_uid": "u-1",
+            "api_key": "wbs-x",
+            "mode": "rotation",
+            "rotation_uid": "u-1",
             "sync_enabled": true,
             "pool_uids": ["u-1", "u-2"],
+            "no_sync_uids": ["u-9"],
             "unknown": 1,
         }));
         assert_eq!(merged.get("port").and_then(Value::as_i64), Some(9000));
-        assert_eq!(merged.get("mode").and_then(Value::as_str), Some("pinned"));
-        assert_eq!(merged.get("pinned_uid").and_then(Value::as_str), Some("u-1"));
+        assert_eq!(merged.get("mode").and_then(Value::as_str), Some("rotation"));
+        assert_eq!(merged.get("rotation_uid").and_then(Value::as_str), Some("u-1"));
         assert_eq!(merged.get("sync_enabled").and_then(Value::as_bool), Some(true));
         assert_eq!(merged.get("pool_uids"), Some(&json!(["u-1", "u-2"])));
+        assert_eq!(merged.get("no_sync_uids"), Some(&json!(["u-9"])));
         assert!(merged.get("unknown").is_none());
+    }
+
+    #[test]
+    fn gateway_config_rejects_unknown_mode() {
+        let merged = merge_gateway_config(&json!({ "mode": "bogus" }));
+        assert_eq!(merged.get("mode").and_then(Value::as_str), Some("balance"), "非法模式回落");
+    }
+
+    #[test]
+    fn generate_api_key_has_wbs_prefix_and_is_unique() {
+        let a = generate_api_key();
+        let b = generate_api_key();
+        assert!(a.starts_with("wbs-"), "前缀 wbs-: {a}");
+        assert_eq!(a.len(), 4 + 32, "wbs- + 32 位十六进制");
+        assert_ne!(a, b, "每次生成不同");
     }
 
     #[test]

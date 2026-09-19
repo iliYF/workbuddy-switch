@@ -737,4 +737,6 @@ export const wb2api = {
     wb2apiFetch<GatewayUpdateResult>("POST", "/api/wb2api/gateway/update", { sha256 }),
   /** 自动挑选空闲端口。 */
   gatewayPickPort: () => wb2apiFetch<{ port: number }>("POST", "/api/wb2api/gateway/pick-port", {}),
+  /** 生成一个网关访问密钥(wbs- 前缀)。 */
+  gatewayGenKey: () => wb2apiFetch<{ api_key: string }>("POST", "/api/wb2api/gateway/gen-key", {}),
 };

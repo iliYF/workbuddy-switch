@@ -46,7 +46,8 @@ pub fn default_gateway_config() -> Value {
         "enabled": false,
         "bin_path": "",
         "port": 54321,
-        "api_key": "",
+        // 访问密钥默认自动生成一个(网关必须鉴权,不允许留空)。
+        "api_key": generate_api_key(),
         "mode": "balance",
         "pinned_uid": null,
         // 积分轮转模式下的当前活跃账号(由 hub 巡检轮转维护)。
@@ -116,11 +117,28 @@ pub fn load_gateway_config() -> Value {
     if f.exists() {
         if let Ok(text) = std::fs::read_to_string(&f) {
             if let Ok(value) = serde_json::from_str::<Value>(&text) {
-                return merge_gateway_config(&value);
+                let had_key = value
+                    .get("api_key")
+                    .and_then(Value::as_str)
+                    .map(|s| !s.trim().is_empty())
+                    .unwrap_or(false);
+                let merged = merge_gateway_config(&value);
+                // 迁移:旧文件 api_key 为空 → 补一个稳定的并落盘,避免每次读都漂移。
+                if !had_key {
+                    let content = serde_json::to_string_pretty(&merged).unwrap_or_default();
+                    let _ = atomic_write(&f, &content);
+                }
+                return merged;
             }
         }
     }
-    default_gateway_config()
+    // 文件缺失:生成默认配置(含自动生成的 api_key)并落盘,保证 key 稳定不漂移。
+    let defaults = default_gateway_config();
+    if std::fs::create_dir_all(wbh_dir()).is_ok() {
+        let content = serde_json::to_string_pretty(&defaults).unwrap_or_default();
+        let _ = atomic_write(&f, &content);
+    }
+    defaults
 }
 
 /// 保存托管配置,并从端口/密钥派生出 wb2api 对接配置(baseUrl/apiKey/authDir)。
@@ -423,6 +441,9 @@ mod tests {
             Some(false),
             "自动入池默认关闭"
         );
+        // 默认配置自带一个自动生成的访问密钥(网关必须鉴权,不允许留空)。
+        let dk = defaults.get("api_key").and_then(Value::as_str).unwrap_or("");
+        assert!(dk.starts_with("wbs-"), "默认 api_key 应为 wbs- 前缀: {dk}");
 
         let merged = merge_gateway_config(&json!({
             "port": 9000,

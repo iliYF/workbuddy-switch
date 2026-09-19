@@ -11,7 +11,6 @@ import {
   Square,
   Play,
   Loader2,
-  Zap,
   Copy,
   Recycle,
   Wand2,
@@ -168,6 +167,10 @@ export default function GatewayPage() {
   const [showKey, setShowKey] = useState(false);
   const [connOpen, setConnOpen] = useState(false);
   const [modelQuery, setModelQuery] = useState("");
+  /** 模型中心的系列过滤:"" = 全部。 */
+  const [modelSeries, setModelSeries] = useState("");
+  /** 模型中心的排序:default(系列内默认) / name / context / credits。 */
+  const [modelSort, setModelSort] = useState<"default" | "name" | "context" | "credits">("default");
   const [catalogSource, setCatalogSource] = useState("");
 
   // 网关托管
@@ -300,24 +303,6 @@ export default function GatewayPage() {
     }
   }
 
-  const [syncResult, setSyncResult] = useState("");
-
-  async function handleGwSync() {
-    setGwBusy(true);
-    try {
-      const res = await api.wb2api.gatewaySyncNow();
-      setSyncResult(
-        res.error
-          ? `同步失败: ${res.error}`
-          : `已导出 ${res.exported} 个、清理 ${res.removed} 个(共 ${res.accounts} 个账号)`,
-      );
-      toast.success("账号已同步到网关 auths");
-    } catch (e) {
-      toast.error("同步失败", { description: asError(e) });
-    } finally {
-      setGwBusy(false);
-    }
-  }
   async function handleGwPickPort() {
     try {
       const r = await api.wb2api.gatewayPickPort();
@@ -441,6 +426,13 @@ export default function GatewayPage() {
     return id.split(":").pop() ?? id;
   }
 
+  /** 模型中心全部系列(供过滤下拉)。 */
+  const allSeries = useMemo(() => {
+    const set = new Set<string>();
+    for (const m of models) set.add(seriesOf(bareModelId(m.id)));
+    return [...set].sort((a, b) => a.localeCompare(b, "zh"));
+  }, [models]);
+
   const modelGroups = useMemo(() => {
     const groups = new Map<string, Wb2apiModel[]>();
     const q = modelQuery.trim().toLowerCase();
@@ -452,15 +444,27 @@ export default function GatewayPage() {
         continue;
       }
       const series = seriesOf(bareModelId(m.id));
+      if (modelSeries && series !== modelSeries) continue;
       if (!groups.has(series)) groups.set(series, []);
       groups.get(series)!.push(m);
     }
     const entries = [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0], "zh"));
     for (const [, list] of entries) {
-      list.sort((a, b) => (b.is_default ? 1 : 0) - (a.is_default ? 1 : 0) || a.id.localeCompare(b.id));
+      list.sort((a, b) => {
+        switch (modelSort) {
+          case "name":
+            return (a.name || bareModelId(a.id)).localeCompare(b.name || bareModelId(b.id), "zh");
+          case "context":
+            return (b.context_length ?? 0) - (a.context_length ?? 0);
+          case "credits":
+            return (a.credits ?? "").localeCompare(b.credits ?? "");
+          default:
+            return (b.is_default ? 1 : 0) - (a.is_default ? 1 : 0) || a.id.localeCompare(b.id);
+        }
+      });
     }
     return entries;
-  }, [models, modelQuery]);
+  }, [models, modelQuery, modelSeries, modelSort]);
 
   const modelSummary = useMemo(() => {
     const reasoning = models.filter(
@@ -628,16 +632,59 @@ export default function GatewayPage() {
                     <p className="text-sm text-muted-foreground">暂无模型(可能无健康账号或拉取失败)。</p>
                   ) : (
                     <>
-                      <Input
-                        value={modelQuery}
-                        onChange={(e) => setModelQuery(e.target.value)}
-                        placeholder="搜索模型(id / 名称 / 描述)…"
-                        className="max-w-sm"
-                      />
+                      {/* 工具栏:搜索 + 系列过滤 + 排序 */}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Input
+                          value={modelQuery}
+                          onChange={(e) => setModelQuery(e.target.value)}
+                          placeholder="搜索模型(id / 名称 / 描述)…"
+                          className="h-8 max-w-xs flex-1 text-xs"
+                        />
+                        <Select value={modelSeries || "__all__"} onValueChange={(v) => setModelSeries(v === "__all__" ? "" : v)}>
+                          <SelectTrigger size="sm" className="h-8 w-40 text-xs">
+                            <SelectValue placeholder="全部系列" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__all__">全部系列</SelectItem>
+                            {allSeries.map((s) => (
+                              <SelectItem key={s} value={s}>
+                                {s}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Select value={modelSort} onValueChange={(v) => setModelSort(v as typeof modelSort)}>
+                          <SelectTrigger size="sm" className="h-8 w-32 text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="default">默认排序</SelectItem>
+                            <SelectItem value="name">按名称</SelectItem>
+                            <SelectItem value="context">按上下文</SelectItem>
+                            <SelectItem value="credits">按倍率</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        {(modelQuery || modelSeries) && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 text-xs"
+                            onClick={() => {
+                              setModelQuery("");
+                              setModelSeries("");
+                            }}
+                          >
+                            清除筛选
+                          </Button>
+                        )}
+                      </div>
+                      <div className="text-[11px] text-muted-foreground">
+                        匹配 {modelGroups.reduce((n, [, l]) => n + l.length, 0)} 个模型
+                      </div>
                       {modelGroups.length === 0 ? (
                         <p className="text-sm text-muted-foreground">没有匹配的模型。</p>
                       ) : (
-                        <div className="max-h-[480px] space-y-5 overflow-y-auto pr-1">
+                        <div className="max-h-[520px] space-y-5 overflow-y-auto pr-1">
                           {modelGroups.map(([series, list]) => (
                             <div key={series} className="space-y-2">
                               <div className="flex items-center gap-2 text-sm font-medium">
@@ -663,9 +710,14 @@ export default function GatewayPage() {
                                     >
                                       <div className="flex items-center justify-between gap-2">
                                         <span className="font-medium">{m.name || bare}</span>
-                                        <span className="font-mono text-xs text-muted-foreground">
+                                        <button
+                                          type="button"
+                                          className="truncate font-mono text-xs text-muted-foreground hover:text-foreground"
+                                          title="点击复制模型名"
+                                          onClick={() => void copyText(m.id, "模型名")}
+                                        >
                                           {bare}
-                                        </span>
+                                        </button>
                                       </div>
                                       {m.description ? (
                                         <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
@@ -780,19 +832,6 @@ export default function GatewayPage() {
                 </div>
               </Row>
 
-              <Row>
-                <div className="min-w-0">
-                  <div className="text-[13px]">账号同步</div>
-                  <div className="mt-0.5 text-[11px] text-muted-foreground">
-                    {gwForm?.sync_enabled ? "自动同步已开启(仅勾选账号)" : "自动同步已关闭(默认)"} · 手动纳管不受影响
-                  </div>
-                </div>
-                <Button variant="outline" size="sm" className="h-7 shrink-0 gap-1.5 text-xs" onClick={() => void handleGwSync()} disabled={gwBusy}>
-                  <Zap className="size-3.5" />
-                  立即同步
-                </Button>
-              </Row>
-              {syncResult && <div className="mx-4 pb-3 text-[11px] text-muted-foreground sm:mx-5">{syncResult}</div>}
           </Section>
 
           <Section title="基本设置" description="工作模式、服务端口与访问密钥(保存后生效)">
@@ -892,7 +931,7 @@ export default function GatewayPage() {
               <Row className="flex-col items-stretch gap-2 sm:flex-row sm:items-center">
                 <div className="min-w-0">
                   <div className="text-[13px]">服务端口</div>
-                  <div className="mt-0.5 text-[11px] text-muted-foreground">预设或自由设置;开放接口中的地址随之变化</div>
+                  <div className="mt-0.5 text-[11px] text-muted-foreground">开放接口地址随端口变化;可一键生成空闲端口</div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1.5">
                   <Input
@@ -901,19 +940,8 @@ export default function GatewayPage() {
                     value={gwForm?.port ?? 54321}
                     onChange={(e) => setGwForm((f) => (f ? { ...f, port: Number(e.target.value) || 54321 } : f))}
                   />
-                  <Select onValueChange={(v) => setGwForm((f) => (f ? { ...f, port: Number(v) } : f))}>
-                    <SelectTrigger size="sm" className="w-28">
-                      <SelectValue placeholder="预设" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="54321">54321(默认)</SelectItem>
-                      <SelectItem value="7863">7863</SelectItem>
-                      <SelectItem value="17863">17863</SelectItem>
-                      <SelectItem value="54320">54320</SelectItem>
-                    </SelectContent>
-                  </Select>
                   <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => void handleGwPickPort()}>
-                    自动
+                    生成
                   </Button>
                 </div>
               </Row>
@@ -921,14 +949,14 @@ export default function GatewayPage() {
               <Row className="flex-col items-stretch gap-2 sm:flex-row sm:items-center">
                 <div className="min-w-0">
                   <div className="text-[13px]">访问密钥 API Key</div>
-                  <div className="mt-0.5 text-[11px] text-muted-foreground">建议设置;留空 = 不鉴权。可随机生成(wbs- 前缀)</div>
+                  <div className="mt-0.5 text-[11px] text-muted-foreground">用于客户端接入鉴权(wbs- 前缀);可一键生成</div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1.5">
                   <Input
                     value={gwForm?.api_key ?? ""}
                     onChange={setGwField("api_key")}
                     type="text"
-                    placeholder="留空=不鉴权"
+                    placeholder="点击生成"
                     className="h-8 w-full font-mono text-xs sm:w-64"
                   />
                   <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs" onClick={() => void handleGenKey()}>
@@ -959,147 +987,108 @@ export default function GatewayPage() {
                 : "未配置 authDir,仅显示池状态"
             }
           >
-                <div className="min-w-0 px-4 pt-3 pb-4 sm:px-5">
-                  {loading && !pool ? (
-                    <Skeleton className="h-24 w-full" />
-                  ) : pool && pool.accounts.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">池内暂无账号,请在下方添加。</p>
-                  ) : (
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>昵称</TableHead>
-                          <TableHead>UID</TableHead>
-                          <TableHead>域</TableHead>
-                          <TableHead>积分</TableHead>
-                          <TableHead>状态</TableHead>
-                          <TableHead className="text-right">操作</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {(pool?.accounts ?? []).map((acc) => (
-                          <TableRow key={acc.uid}>
-                            <TableCell className="font-medium">{acc.nickname || acc.uid}</TableCell>
-                            <TableCell className="font-mono text-xs">{acc.uid.slice(0, 8)}</TableCell>
-                            <TableCell className="text-xs">{acc.realm || "cn"}</TableCell>
-                            <TableCell className="tabular-nums">{acc.pool ? acc.pool.credits : "—"}</TableCell>
-                            <TableCell>
-                              <StatusBadge state={acc.pool} />
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <div className="flex justify-end gap-1.5">
-                                {acc.pool?.manual_disabled ? (
-                                  <Button size="sm" variant="outline" onClick={() => void handleAccountOp(acc.uid, "enable")}>
-                                    启用
-                                  </Button>
-                                ) : (
-                                  <Button size="sm" variant="outline" onClick={() => void handleAccountOp(acc.uid, "disable")}>
-                                    停用
-                                  </Button>
-                                )}
-                                {acc.pool?.disabled && (
-                                  <Button size="sm" variant="secondary" onClick={() => void handleAccountOp(acc.uid, "revive")}>
-                                    复活
-                                  </Button>
-                                )}
-                                <Button size="sm" variant="ghost" onClick={() => void handleOffboard(acc.uid)}>
-                                  <Trash2 className="size-4" />
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  )}
-                </div>
-
-              <div className="border-t border-border/50">
-                <div className="px-4 pt-3 text-[13px] font-medium sm:px-5">添加账号入池</div>
-                <div className="flex flex-wrap items-end gap-3 px-4 py-3 sm:px-5">
-                  <div className="min-w-[220px] flex-1 space-y-1.5">
-                    <Label>选择本地账号</Label>
-                    <Select value={selectedAccountId} onValueChange={setSelectedAccountId}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="选择要入池的账号" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {onboardOptions.length === 0 && (
-                          <div className="px-2 py-1.5 text-sm text-muted-foreground">本地账号库为空,请先扫码添加</div>
-                        )}
-                        {onboardOptions.map((opt) => (
-                          <SelectItem key={opt.id} value={opt.id}>
-                            {opt.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <Button onClick={() => void handleOnboard()} disabled={!selectedAccountId || onboarding}>
-                    <Plug className="size-4" /> {onboarding ? "入池中…" : "添加进池"}
-                  </Button>
-                  <Button variant="outline" onClick={() => setOauthOpen(true)}>
-                    <ArrowLeftRight className="size-4" /> 扫码新增账号
-                  </Button>
-                </div>
+            {/* 第一行:配置项与操作 —— 自动入池开关 + 添加账号入池 + 扫码新增 */}
+            <Row className="flex-wrap gap-3">
+              <label className="flex shrink-0 items-center gap-2 text-[13px]">
+                <Switch
+                  checked={gwForm?.sync_enabled ?? false}
+                  onCheckedChange={(v) => {
+                    setGwForm((f) => (f ? { ...f, sync_enabled: v } : f));
+                  }}
+                />
+                自动入池
+              </label>
+              <div className="flex min-w-[220px] flex-1 items-center gap-2">
+                <Select value={selectedAccountId} onValueChange={setSelectedAccountId}>
+                  <SelectTrigger size="sm" className="h-8 flex-1 text-xs">
+                    <SelectValue placeholder="选择本地账号加入池" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {onboardOptions.length === 0 && (
+                      <div className="px-2 py-1.5 text-sm text-muted-foreground">本地账号库为空,请先扫码添加</div>
+                    )}
+                    {onboardOptions.map((opt) => (
+                      <SelectItem key={opt.id} value={opt.id}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => void handleOnboard()} disabled={!selectedAccountId || onboarding}>
+                  <Plug className="size-3.5" /> {onboarding ? "入池中…" : "添加进池"}
+                </Button>
               </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs" onClick={() => setOauthOpen(true)}>
+                  <ArrowLeftRight className="size-3.5" /> 扫码新增
+                </Button>
+                <Button size="sm" onClick={() => void handleGwSaveConfig()} disabled={!gwForm}>
+                  保存配置
+                </Button>
+              </div>
+            </Row>
 
-              <div className="border-t border-border/50">
-                <div className="px-4 pt-3 text-[13px] font-medium sm:px-5">入池策略</div>
-                <Row>
-                  <div className="min-w-0">
-                    <div className="text-[13px]">自动入池</div>
-                    <div className="mt-0.5 text-[11px] text-muted-foreground">
-                      开启后本地账号库的账号自动进入网关池(仍受下方「永不入池」约束)
-                    </div>
-                  </div>
-                  <Switch
-                    checked={gwForm?.sync_enabled ?? false}
-                    onCheckedChange={(v) => setGwForm((f) => (f ? { ...f, sync_enabled: v } : f))}
-                  />
-                </Row>
-                <div className="min-w-0 space-y-3 px-4 pt-3 pb-4 sm:px-5">
-                  <div className="text-[13px]">
-                    账号入池与永不入池
-                    <span className="ml-2 text-[11px] font-normal text-muted-foreground">
-                      左侧开关「入池选择」,右侧开关「永不入池」(优先)
-                    </span>
-                  </div>
-                  {localAccounts.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">本地账号库为空,请先扫码添加</p>
-                  ) : (
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      {localAccounts.map((acc) => {
-                        const uid = acc.uid ?? "";
-                        const inPool = (gwForm?.pool_uids ?? []).includes(uid);
-                        const never = (gwForm?.no_sync_uids ?? []).includes(uid);
-                        return (
-                          <div key={acc.id} className="flex items-center justify-between gap-3 rounded-lg border border-border/60 px-3 py-2">
-                            <span className={cn("truncate text-sm", never && "text-muted-foreground line-through")}>
-                              {acc.nickname || acc.email || acc.uid || acc.id}
-                            </span>
-                            <div className="flex shrink-0 items-center gap-3 text-[11px] text-muted-foreground">
-                              <label className="flex items-center gap-1.5">
-                                <Switch checked={inPool} onCheckedChange={() => void togglePoolUid(uid)} disabled={!uid || never} />
-                                入池
-                              </label>
-                              <label className="flex items-center gap-1.5">
-                                <Switch checked={never} onCheckedChange={() => void toggleNoSyncUid(uid)} disabled={!uid} />
-                                永不入池
-                              </label>
-                            </div>
+            {/* 第二行:入池账号卡片 */}
+            <div className="min-w-0 px-4 pt-3 pb-4 sm:px-5">
+              {loading && !pool ? (
+                <Skeleton className="h-24 w-full" />
+              ) : (pool?.accounts ?? []).length === 0 ? (
+                <p className="text-sm text-muted-foreground">池内暂无账号,请在上方添加。</p>
+              ) : (
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {pool!.accounts.map((acc) => {
+                    const inPool = (gwForm?.pool_uids ?? []).includes(acc.uid);
+                    const never = (gwForm?.no_sync_uids ?? []).includes(acc.uid);
+                    return (
+                      <div key={acc.uid} className="flex flex-col gap-2 rounded-lg border border-border/60 p-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className={cn("truncate text-sm font-medium", never && "text-muted-foreground line-through")}>
+                            {acc.nickname || acc.uid}
+                          </span>
+                          <StatusBadge state={acc.pool} />
+                        </div>
+                        <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+                          <span className="font-mono">{acc.uid.slice(0, 8)}</span>
+                          <span>{acc.realm || "cn"}</span>
+                          <span className="tabular-nums">积分 {acc.pool ? acc.pool.credits : "—"}</span>
+                        </div>
+                        <div className="mt-auto flex items-center justify-between gap-2 pt-1">
+                          <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+                            <label className="flex items-center gap-1.5">
+                              <Switch checked={inPool} onCheckedChange={() => void togglePoolUid(acc.uid)} disabled={never} />
+                              入池
+                            </label>
+                            <label className="flex items-center gap-1.5">
+                              <Switch checked={never} onCheckedChange={() => void toggleNoSyncUid(acc.uid)} />
+                              永不
+                            </label>
                           </div>
-                        );
-                      })}
-                    </div>
-                  )}
+                          <div className="flex shrink-0 items-center gap-1">
+                            {acc.pool?.manual_disabled ? (
+                              <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => void handleAccountOp(acc.uid, "enable")}>
+                                启用
+                              </Button>
+                            ) : (
+                              <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => void handleAccountOp(acc.uid, "disable")}>
+                                停用
+                              </Button>
+                            )}
+                            {acc.pool?.disabled && (
+                              <Button size="sm" variant="secondary" className="h-7 px-2 text-xs" onClick={() => void handleAccountOp(acc.uid, "revive")}>
+                                复活
+                              </Button>
+                            )}
+                            <Button size="sm" variant="ghost" className="size-7 p-0" onClick={() => void handleOffboard(acc.uid)} aria-label="移除出池">
+                              <Trash2 className="size-3.5" />
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-                <div className="flex justify-end px-4 py-3 sm:px-5">
-                  <Button onClick={() => void handleGwSaveConfig()} disabled={!gwForm}>
-                    保存配置
-                  </Button>
-                </div>
-              </div>
+              )}
+            </div>
           </Section>
 
           <Section title="关于" description="托管网关(wb2api)的基本信息与升级">

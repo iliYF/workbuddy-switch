@@ -942,17 +942,28 @@ fn content_type(path: &str) -> &'static str {
     }
 }
 
-async fn static_handler(uri: Uri) -> Response {
-    let mut path = uri.path().trim_start_matches('/').to_string();
-    if path.is_empty() || path == "index.html" {
-        path = "index.html".to_string();
+/// SPA 前端路由(如 /gateway)回退到 index.html;Content-Type 必须以实际命中的
+/// 资源为准,否则回退时会错给 `application/octet-stream`,浏览器把 HTML 当文件下载。
+fn static_mime_for(raw: &str) -> &'static str {
+    if raw.is_empty() || raw == "index.html" {
+        return content_type("index.html");
     }
+    if Assets::get(raw).is_some() {
+        content_type(raw)
+    } else {
+        content_type("index.html")
+    }
+}
+
+async fn static_handler(uri: Uri) -> Response {
+    let raw = uri.path().trim_start_matches('/').to_string();
+    let mime = static_mime_for(&raw);
     // 前端路由回退到 index.html
-    let data = Assets::get(&path).or_else(|| Assets::get("index.html"));
+    let data = Assets::get(&raw).or_else(|| Assets::get("index.html"));
     match data {
         Some(f) => Response::builder()
             .status(StatusCode::OK)
-            .header(header::CONTENT_TYPE, content_type(&path))
+            .header(header::CONTENT_TYPE, mime)
             .body(Body::from(f.data.into_owned()))
             .unwrap(),
         None => Response::builder()
@@ -964,7 +975,7 @@ async fn static_handler(uri: Uri) -> Response {
 
 #[cfg(test)]
 mod tests {
-    use super::{body_variant, checkin_status_item, query_variant};
+    use super::{body_variant, checkin_status_item, query_variant, static_mime_for, Assets};
     use serde_json::json;
     use wb_switch_core::modules::variant::WbVariant;
 
@@ -1028,5 +1039,28 @@ mod tests {
 
         assert_eq!(item["variant"], "ai");
         assert_eq!(item["statusUnsupported"], true);
+    }
+
+    /// SPA 子路由直接请求(如浏览器刷新 /gateway)必须回退到 index.html 且用
+    /// text/html,否则浏览器会把页面当 octet-stream 下载。
+    #[test]
+    fn spa_route_fallback_serves_index_html_content_type() {
+        assert_eq!(static_mime_for("gateway"), "text/html; charset=utf-8");
+        assert_eq!(static_mime_for(""), "text/html; charset=utf-8");
+        assert_eq!(static_mime_for("index.html"), "text/html; charset=utf-8");
+        assert_eq!(static_mime_for("credit-stats"), "text/html; charset=utf-8");
+        assert_eq!(static_mime_for("token-stats"), "text/html; charset=utf-8");
+    }
+
+    /// 真实静态资源按自身扩展名判定 Content-Type。
+    #[test]
+    fn static_mime_for_real_asset_uses_its_extension() {
+        let js = Assets::iter()
+            .find(|p| p.ends_with(".js"))
+            .expect("dist 应内嵌至少一个 js 资源");
+        assert_eq!(static_mime_for(js.as_ref()), "text/javascript");
+
+        let html = Assets::iter().find(|p| p.ends_with(".html"));
+        assert!(html.is_some());
     }
 }

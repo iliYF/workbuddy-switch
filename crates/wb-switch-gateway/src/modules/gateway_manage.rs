@@ -464,6 +464,14 @@ pub fn stop_gateway() -> Result<Value, String> {
             }
         }
     }
+    // 等待进程完全退出(最多 2s):紧接着 start 的 process_alive 可能仍扫到残留进程,
+    // 导致端口变更重启时误判「已运行」而提前返回,新端口配置不会写入。
+    for _ in 0..20 {
+        if !process_alive() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
     Ok(json!({ "ok": true, "running": false }))
 }
 

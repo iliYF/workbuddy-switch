@@ -461,6 +461,12 @@ export default function GatewayPage() {
       setGwForm(saved);
       savedPortRef.current = saved.port;
       savedApiKeyRef.current = saved.api_key;
+      // 端口/Key 变更后,后端已把 baseUrl/apiKey 派生进 wb2api 对接配置;重新拉取保持 OpenAI 兼容接口显示同步。
+      const conn = await wb2api.getConfig().catch(() => null);
+      if (conn) {
+        setConfig(conn);
+        setForm(conn);
+      }
       return true;
     } catch (e) {
       toast.error("保存失败", { description: asError(e) });
@@ -503,23 +509,14 @@ export default function GatewayPage() {
     if (!next) return;
     const ok = await persistConfig(next);
     if (!ok) return;
-    if (gw?.running) {
+    // 用实时运行状态决定是否重启,避免页面快照过期导致端口变更静默不生效。
+    const s = await wb2api.gatewayStatus().catch(() => null);
+    if (s?.running) {
       await handleGwRestart();
       toast.success("配置已保存并重启网关");
     } else {
       toast.success("配置已保存(网关未运行,下次启动生效)");
     }
-  }
-
-  /** 暂不重启:保存新端口/新 key,下次启动生效。 */
-  async function saveRestartLater() {
-    const next = pendingGwRef.current;
-    pendingGwRef.current = null;
-    setSavingGw(false);
-    setRestartConfirmOpen(false);
-    if (!next) return;
-    const ok = await persistConfig(next);
-    if (ok) toast.success("配置已保存,下次启动生效");
   }
 
   /** 取消:端口/API Key 保持原值(不写入),其余配置照常保存。 */
@@ -1574,18 +1571,15 @@ export default function GatewayPage() {
           <DialogHeader>
             <DialogTitle>端口或 API Key 已修改</DialogTitle>
             <DialogDescription>
-              保存后需要重启网关才能立即生效。可立即重启(现在生效)、暂不重启(下次启动生效),或取消(端口与 API Key 保持原值,其余配置照常保存)。
+              保存并立即重启网关才能生效。若取消,端口与 API Key 保持原值,其余配置照常保存。
             </DialogDescription>
           </DialogHeader>
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={() => void cancelRestartSave()}>
               取消
             </Button>
-            <Button variant="outline" onClick={() => void saveRestartLater()}>
-              暂不重启
-            </Button>
             <Button onClick={() => void confirmRestartAndSave()}>
-              立即重启
+              保存并重启
             </Button>
           </div>
         </DialogContent>

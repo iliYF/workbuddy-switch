@@ -51,7 +51,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { OAuthLoginDialog } from "@/components/oauth-login-dialog";
 import { asError, getCreditExpiry } from "@/lib/api";
-import { wb2api } from "@/lib/wb2api";
+import { wb2api, DEFAULT_GATEWAY_PORT, PORT_PICK_BASE, PORT_PICK_MAX } from "@/lib/wb2api";
 import type {
   CreditExpiry,
   GatewayConfig,
@@ -262,7 +262,7 @@ export default function GatewayPage() {
   /** 端口/API Key 变更后是否重启网关的确认弹窗。 */
   const [restartConfirmOpen, setRestartConfirmOpen] = useState(false);
   /** 最近一次保存的端口与 API Key(检测变更用)。 */
-  const savedPortRef = useRef(54321);
+  const savedPortRef = useRef(DEFAULT_GATEWAY_PORT);
   const savedApiKeyRef = useRef("");
   /** 待保存配置(端口/API Key 变更时先存于此,待重启确认后写入)。 */
   const pendingGwRef = useRef<GatewayConfig | null>(null);
@@ -336,7 +336,7 @@ export default function GatewayPage() {
   }, [configured, pollSeconds]);
 
   // 服务端口可用性:与配置端口一致时用状态探测,否则实时探测(防抖 250ms)。
-  const formPort = gwForm?.port ?? 54321;
+  const formPort = gwForm?.port ?? DEFAULT_GATEWAY_PORT;
   useEffect(() => {
     if (formPort === gw?.port) {
       setPortOk(null);
@@ -668,7 +668,7 @@ export default function GatewayPage() {
   // 接入信息(cc-switch / OpenAI 兼容客户端)
   const connBaseUrl = (config?.baseUrl || form?.baseUrl || "").trim().replace(/\/+$/, "");
   const connApiKey = config?.apiKey || form?.apiKey || "";
-  const connBaseUrlV1 = `${connBaseUrl || "http://127.0.0.1:54321"}/v1`;
+  const connBaseUrlV1 = `${connBaseUrl || `http://127.0.0.1:${DEFAULT_GATEWAY_PORT}`}/v1`;
   const maskedKey = connApiKey ? `${connApiKey.slice(0, 4)}••••${connApiKey.slice(-4)}` : "(未配置,填写 apiKey 后生效)";
   const sampleModels = models.slice(0, 8).map((m) => m.id);
 
@@ -851,7 +851,7 @@ export default function GatewayPage() {
               <li>打开 cc-switch,新建 Provider(类型按客户端选:Claude Code 走 Anthropic / Codex、Cherry Studio 等走 OpenAI)</li>
               <li>
                 Base URL:OpenAI 兼容客户端填 <code>{connBaseUrlV1}</code>;Anthropic 客户端(Claude Code)填{" "}
-                <code>{connBaseUrl || "http://127.0.0.1:54321"}</code>(不带 /v1)
+                <code>{connBaseUrl || `http://127.0.0.1:${DEFAULT_GATEWAY_PORT}`}</code>(不带 /v1)
               </li>
               <li>API Key 填上方密钥(直连 wb2api 用 apiKey;若走 manager 网关用其签发的 wbk_ 密钥)</li>
               <li>模型填上方列表中的带前缀模型名(如 cn:hy3-x),可自定义)</li>
@@ -1209,7 +1209,7 @@ export default function GatewayPage() {
               <Row className="flex-col items-stretch gap-2 sm:flex-row sm:items-center">
                 <div className="min-w-0">
                   <div className="text-[13px]">服务端口</div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">开放接口地址随端口变化;可一键生成随机空闲端口(从 7863 起探测)</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">开放接口地址随端口变化;可一键生成随机空闲端口({PORT_PICK_BASE}~{PORT_PICK_MAX} 随机探测)</div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1.5">
                   <span
@@ -1224,8 +1224,8 @@ export default function GatewayPage() {
                   <Input
                     type="number"
                     className="h-8 w-24 text-xs"
-                    value={gwForm?.port ?? 54321}
-                    onChange={(e) => setGwForm((f) => (f ? { ...f, port: Number(e.target.value) || 54321 } : f))}
+                    value={gwForm?.port ?? DEFAULT_GATEWAY_PORT}
+                    onChange={(e) => setGwForm((f) => (f ? { ...f, port: Number(e.target.value) || DEFAULT_GATEWAY_PORT } : f))}
                   />
                   <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs" onClick={() => void handleGwPickPort()}>
                     <Wand2 className="size-3.5" /> 生成

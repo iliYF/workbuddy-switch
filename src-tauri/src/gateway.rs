@@ -82,7 +82,12 @@ pub fn gateway_sync_now() -> Value {
 
 #[tauri::command]
 pub fn gateway_pick_port() -> Value {
-    json!({ "port": gateway_manage::pick_random_free_port(7863, 100) })
+    json!({
+        "port": gateway_manage::pick_random_free_port(
+            gateway_manage::PORT_PICK_BASE,
+            gateway_manage::PORT_PICK_MAX,
+        )
+    })
 }
 
 #[tauri::command]

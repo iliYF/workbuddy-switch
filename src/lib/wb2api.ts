@@ -6,10 +6,15 @@
 import { invoke } from "@tauri-apps/api/core";
 import { demoModeEnabled } from "./demo-mode";
 import { gatewayDemoResponse } from "./gateway-demo";
+import { API_BASE } from "./server-base";
 import type { WB2APIAdminState, WB2APIConfig, WB2APIModel, WB2APIModelCatalog, WB2APIPoolAccounts, WB2APIPoolSummary, WB2APIStats, GatewayConfig, GatewayStatus, GatewayUpdateCheck, GatewayUpdateResult, WbVariant } from "./types";
 
-/** 网关管理服务地址(与 server 默认端口一致)。 */
-const API_BASE = "http://127.0.0.1:54320";
+/** 网关默认监听端口(与后端 DEFAULT_GATEWAY_PORT 同口径)。 */
+export const DEFAULT_GATEWAY_PORT = 54321;
+/** 自动选端口候选下限(与后端 PORT_PICK_BASE 同口径)。 */
+export const PORT_PICK_BASE = 7863;
+/** 自动选端口候选上限(与后端 PORT_PICK_MAX 同口径)。 */
+export const PORT_PICK_MAX = 65535;
 
 function isWebui(): boolean {
   return typeof window !== "undefined" && !("__TAURI_INTERNALS__" in window);
@@ -117,7 +122,7 @@ export const wb2api = {
       "gateway_sync_now",
       { method: "POST", path: "/api/wb2api/sync/now", body: {} },
     ),
-  /** 自动挑选空闲端口(从 7863 起随机探测)。 */
+  /** 自动挑选空闲端口(PORT_PICK_BASE~PORT_PICK_MAX 随机探测)。 */
   gatewayPickPort: () =>
     call<{ port: number }>("gateway_pick_port", { method: "POST", path: "/api/wb2api/gateway/pick-port", body: {} }),
   /** 探测某端口是否可绑定(服务端口可用性指示)。 */

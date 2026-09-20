@@ -162,9 +162,13 @@ async fn api_gateway_update_apply(Json(body): Json<Value>) -> Response {
     }
 }
 
-/// 自动挑选一个随机空闲端口(从 7863 起探测,范围 100)。
+/// 自动挑选一个随机空闲端口(候选范围 PORT_PICK_BASE~PORT_PICK_MAX)。
 async fn api_gateway_pick_port() -> Response {
-    json_ok(json!({ "port": gateway_manage::pick_random_free_port(7863, 100) }))
+    let port = gateway_manage::pick_random_free_port(
+        gateway_manage::PORT_PICK_BASE,
+        gateway_manage::PORT_PICK_MAX,
+    );
+    json_ok(json!({ "port": port }))
 }
 
 /// 探测某端口是否可绑定(供前端服务端口可用性指示;0 或缺省视为不可用)。

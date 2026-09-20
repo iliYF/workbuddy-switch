@@ -154,6 +154,12 @@ jobs:
       - name: Merge updater manifests
         run: python3 scripts/merge-update-manifests.py artifacts
 
+      # 重建 release,避免 softprops 只追加上传导致旧命名资产残留(同 tag 重跑也不冲突)。
+      - name: Reset Release Assets
+        run: gh release delete "${{ github.ref_name }}" --yes || true
+        env:
+          GH_TOKEN: ${{ github.token }}
+
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v3
         with:

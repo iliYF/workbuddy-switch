@@ -522,7 +522,7 @@ export interface CodeBuddyCnIdeSwitchResult {
 // 网关对接(workbuddy2api,workbuddy-hub 管理面;仅 webui 使用)
 // ---------------------------------------------------------------------------
 
-/** switch 侧对接 workbuddy2api 的配置(`~/.wbh/wb2api.json`)。 */
+/** switch 侧对接 workbuddy2api 的配置(`~/.wb-switch/gateway/wb2api.json`)。 */
 export interface Wb2apiConfig {
   baseUrl: string;
   apiKey: string;
@@ -653,23 +653,29 @@ export interface Wb2apiModelCatalog {
   realm: string;
 }
 
-/** 网关托管配置(`~/.wbh/gateway.json`)。 */
+/** 网关托管配置(`~/.wb-switch/gateway/gateway.json`)。 */
 export interface GatewayConfig {
   enabled: boolean;
-  /** wb2api 二进制路径;空则从 ~/.wbh/gateway/bin 查找。 */
+  /** wb2api 二进制路径;空则从 ~/.wb-switch/gateway/bin 查找。 */
   bin_path: string;
   port: number;
+  /** 访问密钥(wbs- 前缀);空 = 不鉴权。 */
   api_key: string;
-  /** 负载均衡 / 指定账号(后者由账号单向推送据此只导出 pinned_uid)。 */
-  mode: "balance" | "pinned";
+  /** 工作模式:负载均衡 / 积分轮转 / 指定账号。 */
+  mode: "balance" | "rotation" | "pinned";
+  /** 指定账号模式的账号 uid。 */
   pinned_uid: string | null;
+  /** 积分轮转模式下的当前活跃账号 uid(巡检维护)。 */
+  rotation_uid: string | null;
   auto_start: boolean;
   /** 网关独立升级源:二进制 URL 或本地文件路径。 */
   update_source: string;
-  /** 自动同步开关(默认关):开启后才把 pool_uids 里勾选的账号推入网关池。 */
+  /** 自动入池:开启后本地账号库的账号自动进池(仍需不在 no_sync_uids)。 */
   sync_enabled: boolean;
-  /** 用户勾选入池的账号 uid 集合。 */
+  /** 手动入池:显式勾选入池的账号 uid 集合。 */
   pool_uids: string[];
+  /** 永不入池:无论自动/手动都不导出(如主账号,避免风控)。 */
+  no_sync_uids: string[];
 }
 
 /** 网关升级检查结果。 */

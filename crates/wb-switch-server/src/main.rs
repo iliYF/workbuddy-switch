@@ -8,13 +8,14 @@
 //! ```
 
 mod api;
+mod wb2api_routes;
 
 use serde_json::json;
 
 use wb_switch_core::modules::{
     account, auth_file, checkin, config, process, rotate, travel, update, variant::WbVariant,
 };
-use wb_switch_gateway::account_sync;
+use wb_switch_gateway::modules::account_sync;
 
 fn default_port() -> u16 {
     54320

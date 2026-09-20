@@ -2,7 +2,7 @@
 //!
 //! 对 workbuddy2api 的 HTTP 客户端 + 同机 auths/config 文件访问。复用 core 既有的
 //! 账号库 / OAuth / 签到 / 积分,本模块只做「推账号入池 + 拉池状态 + 运维」。
-//! 新增配置统一放 `~/.wbh`(既有 `~/.wb-switch` 零回归)。
+//! 配置统一放 `~/.wb-switch/gateway/`(与 switch 账号库同根,不再有独立代号目录)。
 
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -13,16 +13,16 @@ use wb_switch_core::modules::config::{atomic_write, home_dir, http_request};
 use wb_switch_core::modules::variant::WbVariant;
 
 // ---------------------------------------------------------------------------
-// hub 数据根与对接配置(三件套,仿 config.rs 既有模式)
+// 网关配置根(`~/.wb-switch/gateway/`)与对接配置
 // ---------------------------------------------------------------------------
 
-/// hub 新数据根:新增配置统一放 `~/.wbh`。
-pub fn wbh_dir() -> PathBuf {
-    home_dir().join(".wbh")
+/// 网关配置根目录:`~/.wb-switch/gateway`(统一收归 switch 项目配置目录)。
+pub fn gateway_root() -> PathBuf {
+    home_dir().join(".wb-switch").join("gateway")
 }
 
 pub fn wb2api_config_file() -> PathBuf {
-    wbh_dir().join("wb2api.json")
+    gateway_root().join("wb2api.json")
 }
 
 pub fn default_wb2api_config() -> Value {
@@ -64,7 +64,7 @@ pub fn load_wb2api_config() -> Value {
 /// 保存对接配置(只保留已知字段)。
 pub fn save_wb2api_config(cfg: &Value) -> std::io::Result<()> {
     let merged = merge_wb2api_config(cfg);
-    std::fs::create_dir_all(wbh_dir())?;
+    std::fs::create_dir_all(gateway_root())?;
     let content = serde_json::to_string_pretty(&merged).unwrap_or_default();
     atomic_write(&wb2api_config_file(), &content)
 }
@@ -802,10 +802,11 @@ mod tests {
     }
 
     #[test]
-    fn wb2api_config_file_lives_under_wbh_dir() {
-        assert!(wb2api_config_file().starts_with(wbh_dir()));
-        assert!(wbh_dir().ends_with(".wbh"));
-        assert_ne!(wbh_dir(), wb_switch_core::modules::config::store_dir(), "hub 新数据根与既有 ~/.wb-switch 分离");
+    fn wb2api_config_file_lives_under_gateway_root() {
+        assert!(wb2api_config_file().starts_with(gateway_root()));
+        assert!(gateway_root().ends_with("gateway"));
+        // 网关配置根在 switch 项目配置目录下(与账号库同根)。
+        assert!(gateway_root().starts_with(wb_switch_core::modules::config::store_dir()));
     }
 
     #[test]

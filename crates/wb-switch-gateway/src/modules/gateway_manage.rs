@@ -11,34 +11,34 @@ use std::sync::Mutex;
 
 use wb_switch_core::modules::config::{atomic_write, http_request};
 
-use crate::wb2api::wbh_dir;
+use crate::modules::wb2api::gateway_root;
 
 /// 进程句柄:server 进程内单例(与账号库并发写一致,单实例保护由宿主负责)。
 static GATEWAY_PROC: Mutex<Option<Child>> = Mutex::new(None);
 
 // ---------------------------------------------------------------------------
-// 路径与配置三件套(~/.wbh/gateway.json)
+// 路径与配置三件套(~/.wb-switch/gateway/gateway.json)
 // ---------------------------------------------------------------------------
 
 pub fn gateway_config_file() -> PathBuf {
-    wbh_dir().join("gateway.json")
+    gateway_root().join("gateway.json")
 }
 
 pub fn gateway_bin_dir() -> PathBuf {
-    wbh_dir().join("gateway").join("bin")
+    gateway_root().join("bin")
 }
 
 pub fn gateway_native_config_file() -> PathBuf {
-    wbh_dir().join("gateway").join("gateway_native_config.json")
+    gateway_root().join("gateway_native_config.json")
 }
 
 /// 被托管网关的账号凭证目录(account_sync 推送至此)。
 pub fn gateway_auth_dir() -> PathBuf {
-    wbh_dir().join("gateway").join("auths")
+    gateway_root().join("auths")
 }
 
 fn gateway_state_file() -> PathBuf {
-    wbh_dir().join("gateway").join("data").join("state.json")
+    gateway_root().join("data").join("state.json")
 }
 
 pub fn default_gateway_config() -> Value {
@@ -46,24 +46,43 @@ pub fn default_gateway_config() -> Value {
         "enabled": false,
         "bin_path": "",
         "port": 54321,
-        "api_key": "",
+        // 访问密钥默认自动生成一个(网关必须鉴权,不允许留空)。
+        "api_key": generate_api_key(),
         "mode": "balance",
         "pinned_uid": null,
+        // 积分轮转模式下的当前活跃账号(由 hub 巡检轮转维护)。
+        "rotation_uid": null,
         "auto_start": false,
         "update_source": "",
+        // 自动入池:开启后本地账号库的账号自动进入网关池(仍需不在 no_sync_uids)。
         "sync_enabled": false,
+        // 手动入池:显式勾选要入池的账号(自动入池关闭时是唯一来源)。
         "pool_uids": [],
+        // 永不入池:无论自动/手动都不导出(如主账号,避免风控)。
+        "no_sync_uids": [],
     })
+}
+
+/// 生成访问密钥:`wbs-` 前缀 + 32 位十六进制随机。
+pub fn generate_api_key() -> String {
+    format!("wbs-{}", uuid::Uuid::new_v4().simple())
 }
 
 fn merge_gateway_config(input: &Value) -> Value {
     let mut merged = default_gateway_config();
     if let Some(map) = input.as_object() {
-        for key in ["bin_path", "api_key", "mode", "update_source"] {
+        for key in ["bin_path", "api_key", "update_source"] {
             if let Some(v) = map.get(key).and_then(Value::as_str) {
                 if !v.trim().is_empty() {
                     merged[key] = json!(v.trim());
                 }
+            }
+        }
+        // mode 限定三值,非法回落 balance。
+        if let Some(v) = map.get("mode").and_then(Value::as_str) {
+            let m = v.trim();
+            if matches!(m, "balance" | "rotation" | "pinned") {
+                merged["mode"] = json!(m);
             }
         }
         if let Some(v) = map.get("port").and_then(Value::as_i64) {
@@ -76,36 +95,146 @@ fn merge_gateway_config(input: &Value) -> Value {
                 merged[key] = json!(v);
             }
         }
-        if let Some(v) = map.get("pool_uids").and_then(Value::as_array) {
-            let uids: Vec<&str> = v.iter().filter_map(Value::as_str).collect();
-            merged["pool_uids"] = json!(uids);
+        for key in ["pool_uids", "no_sync_uids"] {
+            if let Some(v) = map.get(key).and_then(Value::as_array) {
+                let uids: Vec<&str> = v.iter().filter_map(Value::as_str).collect();
+                merged[key] = json!(uids);
+            }
         }
-        if let Some(v) = map.get("pinned_uid").cloned() {
-            if !v.is_null() {
-                merged["pinned_uid"] = v;
+        for key in ["pinned_uid", "rotation_uid"] {
+            if let Some(v) = map.get(key).cloned() {
+                if !v.is_null() {
+                    merged[key] = v;
+                }
             }
         }
     }
     merged
 }
 
+/// 一次性迁移:把旧 `~/.wbh/` 下的网关配置搬到新的 `~/.wb-switch/gateway/`。
+///
+/// 仅当新路径尚无 gateway.json、且旧路径存在时执行;搬运 gateway.json、wb2api.json
+/// 与整个 gateway/ 子目录(bin/auths 等)。失败静默(下次读取会走默认)。
+fn migrate_legacy_wbh_dir() {
+    let legacy = wb_switch_core::modules::config::home_dir().join(".wbh");
+    if !legacy.exists() {
+        return;
+    }
+    let new_root = gateway_root();
+    if new_root.join("gateway.json").exists() {
+        return; // 新路径已有配置,不覆盖
+    }
+    let _ = std::fs::create_dir_all(&new_root);
+    // 旧的 gateway.json → 新 gateway/gateway.json
+    if let Ok(text) = std::fs::read_to_string(legacy.join("gateway.json")) {
+        let _ = atomic_write(&new_root.join("gateway.json"), &text);
+    }
+    // 旧的 wb2api.json → 新 wb2api.json;并把其中指向旧根(authDir/configPath)的
+    // 路径改写为新根(`~/.wbh/gateway/X` → `~/.wb-switch/gateway/X`),避免派生
+    // 产物还指向旧目录。
+    if let Ok(text) = std::fs::read_to_string(legacy.join("wb2api.json")) {
+        let mut v = serde_json::from_str::<Value>(&text).unwrap_or_else(|_| json!({}));
+        let old_prefix = legacy.join("gateway").to_string_lossy().to_string();
+        for key in ["authDir", "configPath"] {
+            if let Some(val) = v.get(key).and_then(Value::as_str) {
+                if val.starts_with(&old_prefix) {
+                    let rest = val[old_prefix.len()..].trim_start_matches('/');
+                    v[key] = json!(new_root.join(rest).to_string_lossy());
+                }
+            }
+        }
+        let _ = atomic_write(&new_root.join("wb2api.json"), &serde_json::to_string_pretty(&v).unwrap_or_default());
+    }
+    // 旧的 gateway/ 子目录(bin/auths/native/state 等)整体搬入
+    let legacy_sub = legacy.join("gateway");
+    if legacy_sub.is_dir() {
+        if let Ok(rd) = std::fs::read_dir(&legacy_sub) {
+            for entry in rd.flatten() {
+                let name = entry.file_name();
+                let dest = new_root.join(&name);
+                if dest.exists() {
+                    continue;
+                }
+                let src = entry.path();
+                if src.is_dir() {
+                    let _ = copy_dir_recursive(&src, &dest);
+                } else {
+                    let _ = std::fs::copy(&src, &dest);
+                }
+            }
+        }
+    }
+}
+
+fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let to = dst.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir_recursive(&entry.path(), &to)?;
+        } else {
+            std::fs::copy(entry.path(), &to)?;
+        }
+    }
+    Ok(())
+}
+
 pub fn load_gateway_config() -> Value {
+    migrate_legacy_wbh_dir();
     let f = gateway_config_file();
     if f.exists() {
         if let Ok(text) = std::fs::read_to_string(&f) {
             if let Ok(value) = serde_json::from_str::<Value>(&text) {
-                return merge_gateway_config(&value);
+                let had_key = value
+                    .get("api_key")
+                    .and_then(Value::as_str)
+                    .map(|s| !s.trim().is_empty())
+                    .unwrap_or(false);
+                let merged = merge_gateway_config(&value);
+                // 迁移:旧文件 api_key 为空 → 补一个稳定的并落盘,避免每次读都漂移。
+                if !had_key {
+                    let content = serde_json::to_string_pretty(&merged).unwrap_or_default();
+                    let _ = atomic_write(&f, &content);
+                }
+                return merged;
             }
         }
     }
-    default_gateway_config()
+    // 文件缺失:生成默认配置(含自动生成的 api_key)并落盘,保证 key 稳定不漂移。
+    let defaults = default_gateway_config();
+    if std::fs::create_dir_all(gateway_root()).is_ok() {
+        let content = serde_json::to_string_pretty(&defaults).unwrap_or_default();
+        let _ = atomic_write(&f, &content);
+    }
+    defaults
 }
 
+/// 保存托管配置,并从端口/密钥派生出 wb2api 对接配置(baseUrl/apiKey/authDir)。
+///
+/// 网关页只让用户填一次(端口 + API Key);hub 连网关所需的对接信息由这里自动
+/// 写入 `~/.wb-switch/gateway/wb2api.json`,避免两处重复填写。
 pub fn save_gateway_config(cfg: &Value) -> std::io::Result<()> {
     let merged = merge_gateway_config(cfg);
-    std::fs::create_dir_all(wbh_dir())?;
+    std::fs::create_dir_all(gateway_root())?;
     let content = serde_json::to_string_pretty(&merged).unwrap_or_default();
-    atomic_write(&gateway_config_file(), &content)
+    atomic_write(&gateway_config_file(), &content)?;
+    write_derived_wb2api_config(&merged);
+    Ok(())
+}
+
+/// 把网关配置派生进 wb2api 对接配置(端口→baseUrl,api_key→apiKey,凭证目录→authDir)。
+fn write_derived_wb2api_config(gw: &Value) {
+    let port = gw.get("port").and_then(Value::as_i64).unwrap_or(54321);
+    let api_key = gw.get("api_key").and_then(Value::as_str).unwrap_or("");
+    let derived = json!({
+        "baseUrl": format!("http://127.0.0.1:{port}"),
+        "apiKey": api_key,
+        "authDir": gateway_auth_dir().to_string_lossy(),
+        "configPath": gateway_native_config_file().to_string_lossy(),
+    });
+    let _ = crate::modules::wb2api::save_wb2api_config(&derived);
 }
 
 fn cfg_str(key: &str) -> String {
@@ -129,7 +258,7 @@ fn cfg_port() -> u16 {
 // 二进制定位 / 端口
 // ---------------------------------------------------------------------------
 
-/// 定位网关二进制:env `WB_SWITCH_GATEWAY_BIN` → `~/.wbh/gateway/bin/` → 配置 `bin_path`。
+/// 定位网关二进制:env `WB_SWITCH_GATEWAY_BIN` → `~/.wb-switch/gateway/bin/` → 配置 `bin_path`。
 pub fn locate_gateway() -> Option<PathBuf> {
     if let Ok(p) = std::env::var("WB_SWITCH_GATEWAY_BIN") {
         let p = p.trim().to_string();
@@ -202,16 +331,20 @@ pub async fn probe_health(port: u16) -> bool {
 /// 启动网关:写配置 → 拉起子进程 → 健康检查重试(最多 5s)。
 pub async fn start_gateway() -> Result<Value, String> {
     if process_alive() {
-        return Ok(json!({ "ok": true, "running": true, "message": "网关已在运行" }));
+        // 进程活着:仍以 healthz 复核;健康则直接返回,不健康则报错(提示重启)。
+        if probe_health(cfg_port()).await {
+            return Ok(json!({ "ok": true, "running": true, "healthy": true, "port": cfg_port() }));
+        }
+        return Err("网关进程在,但 /healthz 不健康;可尝试重启".to_string());
     }
-    let bin = locate_gateway().ok_or("未找到网关二进制:请配置 bin_path 或放入 ~/.wbh/gateway/bin")?;
+    let bin = locate_gateway().ok_or("未找到网关二进制:请配置 bin_path 或放入 ~/.wb-switch/gateway/bin")?;
     if !port_available(cfg_port()) {
         return Err(format!("端口 {} 已被占用,可先选择空闲端口", cfg_port()));
     }
     let config_path = write_native_config()?;
     std::fs::create_dir_all(gateway_auth_dir()).map_err(|e| format!("创建 auths 目录失败: {e}"))?;
     // 启动前先同步一次账号,让网关池有凭证。
-    crate::account_sync::sync_now();
+    crate::modules::account_sync::sync_now();
     let child = Command::new(&bin)
         .arg("-config")
         .arg(&config_path)
@@ -380,24 +513,44 @@ mod tests {
         assert_eq!(
             defaults.get("sync_enabled").and_then(Value::as_bool),
             Some(false),
-            "自动同步默认关闭"
+            "自动入池默认关闭"
         );
+        // 默认配置自带一个自动生成的访问密钥(网关必须鉴权,不允许留空)。
+        let dk = defaults.get("api_key").and_then(Value::as_str).unwrap_or("");
+        assert!(dk.starts_with("wbs-"), "默认 api_key 应为 wbs- 前缀: {dk}");
 
         let merged = merge_gateway_config(&json!({
             "port": 9000,
-            "api_key": "k",
-            "mode": "pinned",
-            "pinned_uid": "u-1",
+            "api_key": "wbs-x",
+            "mode": "rotation",
+            "rotation_uid": "u-1",
             "sync_enabled": true,
             "pool_uids": ["u-1", "u-2"],
+            "no_sync_uids": ["u-9"],
             "unknown": 1,
         }));
         assert_eq!(merged.get("port").and_then(Value::as_i64), Some(9000));
-        assert_eq!(merged.get("mode").and_then(Value::as_str), Some("pinned"));
-        assert_eq!(merged.get("pinned_uid").and_then(Value::as_str), Some("u-1"));
+        assert_eq!(merged.get("mode").and_then(Value::as_str), Some("rotation"));
+        assert_eq!(merged.get("rotation_uid").and_then(Value::as_str), Some("u-1"));
         assert_eq!(merged.get("sync_enabled").and_then(Value::as_bool), Some(true));
         assert_eq!(merged.get("pool_uids"), Some(&json!(["u-1", "u-2"])));
+        assert_eq!(merged.get("no_sync_uids"), Some(&json!(["u-9"])));
         assert!(merged.get("unknown").is_none());
+    }
+
+    #[test]
+    fn gateway_config_rejects_unknown_mode() {
+        let merged = merge_gateway_config(&json!({ "mode": "bogus" }));
+        assert_eq!(merged.get("mode").and_then(Value::as_str), Some("balance"), "非法模式回落");
+    }
+
+    #[test]
+    fn generate_api_key_has_wbs_prefix_and_is_unique() {
+        let a = generate_api_key();
+        let b = generate_api_key();
+        assert!(a.starts_with("wbs-"), "前缀 wbs-: {a}");
+        assert_eq!(a.len(), 4 + 32, "wbs- + 32 位十六进制");
+        assert_ne!(a, b, "每次生成不同");
     }
 
     #[test]
@@ -413,9 +566,12 @@ mod tests {
     }
 
     #[test]
-    fn gateway_paths_live_under_wbh_dir() {
-        assert!(gateway_config_file().starts_with(wbh_dir()));
-        assert!(gateway_auth_dir().starts_with(wbh_dir()));
-        assert!(gateway_bin_dir().ends_with("gateway/bin"));
+    fn gateway_paths_live_under_gateway_root() {
+        let root = gateway_root();
+        assert!(gateway_config_file().starts_with(&root));
+        assert!(gateway_auth_dir().starts_with(&root));
+        assert!(gateway_bin_dir().ends_with("bin"));
+        // 网关配置根 = ~/.wb-switch/gateway(统一收归 switch 项目配置目录)。
+        assert!(root.ends_with("gateway") && root.starts_with(wb_switch_core::modules::config::store_dir()));
     }
 }

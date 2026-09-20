@@ -13,11 +13,11 @@ use wb_switch_core::modules::account;
 use wb_switch_core::modules::config::atomic_write;
 use wb_switch_core::modules::variant::WbVariant;
 
-use crate::gateway_manage::{gateway_auth_dir, load_gateway_config};
-use crate::wb2api::wbh_dir;
+use crate::modules::gateway_manage::{gateway_auth_dir, load_gateway_config};
+use crate::modules::wb2api::gateway_root;
 
 fn sync_state_file() -> PathBuf {
-    wbh_dir().join("gateway").join("sync.json")
+    gateway_root().join("sync.json")
 }
 
 /// 单个账号 → wb2api 嵌套凭证(对齐 SaveAtomic);保留既有 `credit` 块。
@@ -72,6 +72,10 @@ fn accounts_fingerprint(accounts: &[Value]) -> u64 {
     let gw = load_gateway_config();
     gw.get("sync_enabled").hash(&mut hasher);
     gw.get("pool_uids").hash(&mut hasher);
+    gw.get("no_sync_uids").hash(&mut hasher);
+    gw.get("mode").hash(&mut hasher);
+    gw.get("pinned_uid").hash(&mut hasher);
+    gw.get("rotation_uid").hash(&mut hasher);
     hasher.finish()
 }
 
@@ -82,7 +86,7 @@ fn load_last_fingerprint() -> Option<u64> {
 }
 
 fn save_fingerprint(fp: u64) -> std::io::Result<()> {
-    std::fs::create_dir_all(wbh_dir())?;
+    std::fs::create_dir_all(gateway_root())?;
     let content = serde_json::to_string_pretty(&json!({ "fingerprint": fp })).unwrap_or_default();
     atomic_write(&sync_state_file(), &content)
 }
@@ -93,19 +97,18 @@ fn save_fingerprint(fp: u64) -> std::io::Result<()> {
 pub fn export_accounts_to_auths() -> Result<Value, String> {
     let gw = load_gateway_config();
     let sync_enabled = gw.get("sync_enabled").and_then(Value::as_bool).unwrap_or(false);
-    if !sync_enabled {
-        return Ok(json!({
-            "disabled": true,
-            "exported": 0,
-            "removed": 0,
-            "message": "自动同步未开启,账号需手动纳管",
-        }));
-    }
     let mode = gw.get("mode").and_then(Value::as_str).unwrap_or("balance");
     let pinned = gw.get("pinned_uid").and_then(Value::as_str).unwrap_or("");
-    // 用户勾选入池的账号(pool_uids);pinned 模式进一步收窄到 pinned_uid。
+    let rotation = gw.get("rotation_uid").and_then(Value::as_str).unwrap_or("");
+    // 手动入池:显式勾选的账号集合。
     let pool_uids: HashSet<String> = gw
         .get("pool_uids")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
+        .unwrap_or_default();
+    // 永不入池:无论自动/手动都排除(如主账号,避免风控)。
+    let no_sync_uids: HashSet<String> = gw
+        .get("no_sync_uids")
         .and_then(Value::as_array)
         .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
         .unwrap_or_default();
@@ -123,11 +126,19 @@ pub fn export_accounts_to_auths() -> Result<Value, String> {
         if acc.get("needs_relogin").and_then(Value::as_bool).unwrap_or(false) {
             continue; // 需重登不导出
         }
-        if mode == "pinned" && !pinned.is_empty() && uid != pinned {
-            continue; // 指定账号模式只导出 pinned_uid
+        if no_sync_uids.contains(&uid) {
+            continue; // 永不入池名单:优先级最高,排除
         }
-        if !pool_uids.is_empty() && !pool_uids.contains(&uid) {
-            continue; // 只导出用户勾选入池的账号;pool_uids 为空视为未选择,不导出
+        // 入池来源:手动勾选(pool_uids)或自动入池(sync_enabled)二者之一。
+        let selected = pool_uids.contains(&uid) || sync_enabled;
+        if !selected {
+            continue;
+        }
+        // 工作模式收窄:指定账号只留 pinned;积分轮转只留当前活跃号;负载均衡不限。
+        match mode {
+            "pinned" if !pinned.is_empty() && uid != pinned => continue,
+            "rotation" if !rotation.is_empty() && uid != rotation => continue,
+            _ => {}
         }
         wanted_uids.insert(uid.clone());
         let path = dir.join(format!("workbuddy-{uid}.json"));

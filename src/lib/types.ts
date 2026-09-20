@@ -518,3 +518,147 @@ export interface CodeBuddyCnIdeSwitchResult {
   message?: string;
 }
 
+// ---------------------------------------------------------------------------
+// 网关对接(workbuddy2api,workbuddy-hub 管理面;仅 webui 使用)
+// ---------------------------------------------------------------------------
+
+/** switch 侧对接 workbuddy2api 的配置(`~/.wbh/wb2api.json`)。 */
+export interface Wb2apiConfig {
+  baseUrl: string;
+  apiKey: string;
+  /** wb2api 部署的 `auths/` 绝对路径。 */
+  authDir: string;
+  /** wb2api 的 `config.json` 绝对路径(可选,用于配置编辑)。 */
+  configPath: string;
+}
+
+/** 池账号运行时状态(来自 wb2api `/status` 的 accounts 条目)。 */
+export interface Wb2apiPoolState {
+  uid: string;
+  realm?: string;
+  nickname?: string;
+  credits: number;
+  cooling: boolean;
+  cool_remaining_sec?: number;
+  disabled: boolean;
+  disabled_reason?: string;
+  manual_disabled: boolean;
+  manual_reason?: string;
+  in_flight: number;
+  [key: string]: unknown;
+}
+
+/** 池账号 = auths 文件解析的凭证信息 + 运行时状态(状态可能缺失)。 */
+export interface Wb2apiPoolAccount {
+  uid: string;
+  accessToken: string;
+  nickname: string;
+  enterpriseId: string;
+  domain: string;
+  realm: string;
+  deviceToken?: string;
+  file: string;
+  /** 未在池中或 status 不可达时缺失。 */
+  pool?: Wb2apiPoolState;
+}
+
+export interface Wb2apiPoolAccounts {
+  accounts: Wb2apiPoolAccount[];
+  configured: boolean;
+  /** `/status` 原始响应;status 不可达时为 null。 */
+  pool: Record<string, unknown> | null;
+}
+
+/** `/status` 顶层汇总字段(除 accounts)。 */
+export interface Wb2apiPoolSummary {
+  total: number;
+  healthy: number;
+  cooling: number;
+  disabled: number;
+  in_flight_full: boolean;
+  realm_totals?: Record<
+    string,
+    { total: number; healthy: number; cooling: number; disabled: number; in_flight_full: number }
+  >;
+  sticky_sessions?: number;
+  redis_mode?: string;
+  [key: string]: unknown;
+}
+
+/** `/v1/stats` 的单模型统计行。 */
+export interface Wb2apiStatsModel {
+  model: string;
+  requests: number;
+  success: number;
+  failed: number;
+  streaming: number;
+  avg_ttfb_ms: number;
+  avg_latency_ms: number;
+  tokens_per_sec: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  cache_hit_tokens: number;
+  cache_miss_tokens: number;
+  cache_write_tokens: number;
+  cache_hit_rate: number;
+  credit: number;
+  credit_per_req: number;
+  last_seen?: string | null;
+}
+
+export interface Wb2apiStats {
+  enabled: boolean;
+  since: string;
+  now: string;
+  uptime_sec: number;
+  total: Wb2apiStatsModel;
+  models: Wb2apiStatsModel[];
+}
+
+/** `/v1/models` 条目(OpenAI 格式,id 带 cn:/global: 前缀;上游已透出富字段)。 */
+export interface Wb2apiModel {
+  id: string;
+  name?: string;
+  description?: string;
+  context_length?: number;
+  max_output_tokens?: number;
+  /** 积分倍率原文(如 "x0.05"),仅展示。 */
+  credits?: string;
+  owned_by?: string;
+  vendor?: string;
+  tags?: string[];
+  is_default?: boolean;
+  supports_images?: boolean;
+  supports_reasoning?: boolean;
+  supports_tool_call?: boolean;
+  only_reasoning?: boolean;
+  reasoning_effort?: string;
+  reasoning_summary?: string;
+  reasoning_supported_efforts?: string[];
+  reasoning_default_effort?: string;
+  /** 系列归属(前端也可自行推导);来自模型中心。 */
+  series?: string;
+  [key: string]: unknown;
+}
+
+/** 模型中心返回:模型目录 + 来源元信息(直连腾讯,失败回退上游)。 */
+export interface Wb2apiModelCatalog {
+  models: Wb2apiModel[];
+  /** tencent | upstream */
+  source: string;
+  source_label: string;
+  via?: string;
+  errors?: string[];
+  realm: string;
+}
+
+/** admin 端点响应体。 */
+export interface Wb2apiAdminState {
+  uid: string;
+  manual_disabled: boolean;
+  manual_reason?: string;
+  disabled: boolean;
+  changed: boolean;
+}
+

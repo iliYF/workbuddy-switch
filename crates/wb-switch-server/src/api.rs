@@ -8,7 +8,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use axum::body::Body;
-use axum::extract::RawQuery;
+use axum::extract::{Path, RawQuery};
 use axum::http::{header, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -21,6 +21,7 @@ use wb_switch_core::modules::{
     credit_usage, credits, export_import, limits, oauth, process, rate_limit_events,
     rate_limit_hook, refresh, rotate, session, switch, token_stats, travel, update,
     variant::WbVariant,
+    wb2api,
 };
 
 /// WorkBuddy 运行状态缓存：Windows 上检测要跑 tasklist（慢），缓存几秒避免
@@ -140,6 +141,34 @@ pub fn router() -> Router {
         .route(
             "/api/update/config",
             get(api_update_config).post(api_save_update_config),
+        )
+        // workbuddy-hub 网关对接(workbuddy2api 管理面,additive 路由段)
+        .route("/api/wb2api/status", get(api_wb2api_status))
+        .route("/api/wb2api/models", get(api_wb2api_models))
+        .route("/api/wb2api/stats", get(api_wb2api_stats))
+        .route("/api/wb2api/pool-accounts", get(api_wb2api_pool_accounts))
+        .route("/api/wb2api/model-catalog", get(api_wb2api_model_catalog))
+        .route(
+            "/api/wb2api/accounts/:uid/disable",
+            post(api_wb2api_account_disable),
+        )
+        .route(
+            "/api/wb2api/accounts/:uid/enable",
+            post(api_wb2api_account_enable),
+        )
+        .route(
+            "/api/wb2api/accounts/:uid/revive",
+            post(api_wb2api_account_revive),
+        )
+        .route("/api/wb2api/onboard", post(api_wb2api_onboard))
+        .route("/api/wb2api/offboard", post(api_wb2api_offboard))
+        .route(
+            "/api/wb2api/config",
+            get(api_wb2api_config_get).post(api_wb2api_config_save),
+        )
+        .route(
+            "/api/wb2api/upstream-config",
+            get(api_wb2api_upstream_config_get).post(api_wb2api_upstream_config_save),
         )
         .fallback(static_handler)
 }
@@ -791,6 +820,118 @@ async fn api_save_update_config(Json(body): Json<Value>) -> Response {
 }
 
 // ---------------------------------------------------------------------------
+// wb2api 网关对接(workbuddy-hub 管理面)
+// ---------------------------------------------------------------------------
+
+async fn api_wb2api_status() -> Response {
+    match wb2api::status().await {
+        Ok(v) => json_ok(v),
+        Err(e) => json_err(e, StatusCode::BAD_GATEWAY),
+    }
+}
+
+async fn api_wb2api_models() -> Response {
+    match wb2api::models().await {
+        Ok(v) => json_ok(v),
+        Err(e) => json_err(e, StatusCode::BAD_GATEWAY),
+    }
+}
+
+async fn api_wb2api_stats() -> Response {
+    match wb2api::stats().await {
+        Ok(v) => json_ok(v),
+        Err(e) => json_err(e, StatusCode::BAD_GATEWAY),
+    }
+}
+
+async fn api_wb2api_pool_accounts() -> Response {
+    json_ok(wb2api::pool_accounts().await)
+}
+
+/// 模型中心:指定版本的模型目录(realm 缺省 cn;直连腾讯,失败回退上游)。
+async fn api_wb2api_model_catalog(RawQuery(query): RawQuery) -> Response {
+    let realm = query
+        .as_deref()
+        .and_then(|q| {
+            q.split('&').find_map(|p| {
+                let (k, v) = p.split_once('=').unwrap_or((p, ""));
+                (k == "realm").then_some(v)
+            })
+        })
+        .unwrap_or("cn");
+    json_ok(wb2api::model_catalog(WbVariant::parse(Some(realm))).await)
+}
+
+async fn api_wb2api_account_disable(Path(uid): Path<String>, Json(body): Json<Value>) -> Response {
+    let reason = body.get("reason").and_then(Value::as_str).unwrap_or("");
+    match wb2api::account_op(&uid, "disable", reason).await {
+        Ok(v) => json_ok(v),
+        Err(e) => json_err(e, StatusCode::BAD_REQUEST),
+    }
+}
+
+async fn api_wb2api_account_enable(Path(uid): Path<String>, _body: Option<Json<Value>>) -> Response {
+    match wb2api::account_op(&uid, "enable", "").await {
+        Ok(v) => json_ok(v),
+        Err(e) => json_err(e, StatusCode::BAD_REQUEST),
+    }
+}
+
+async fn api_wb2api_account_revive(Path(uid): Path<String>, _body: Option<Json<Value>>) -> Response {
+    match wb2api::account_op(&uid, "revive", "").await {
+        Ok(v) => json_ok(v),
+        Err(e) => json_err(e, StatusCode::BAD_REQUEST),
+    }
+}
+
+async fn api_wb2api_onboard(Json(body): Json<Value>) -> Response {
+    let account_id = body.get("accountId").and_then(Value::as_str).unwrap_or("");
+    match wb2api::onboard(account_id) {
+        Ok(v) => json_ok(v),
+        Err(e) => json_err(e, StatusCode::BAD_REQUEST),
+    }
+}
+
+async fn api_wb2api_offboard(Json(body): Json<Value>) -> Response {
+    let uid = body.get("uid").and_then(Value::as_str).unwrap_or("");
+    match wb2api::offboard(uid) {
+        Ok(v) => json_ok(v),
+        Err(e) => json_err(e, StatusCode::BAD_REQUEST),
+    }
+}
+
+/// switch 侧对接配置(读)。
+async fn api_wb2api_config_get() -> Response {
+    json_ok(wb2api::load_wb2api_config())
+}
+
+/// switch 侧对接配置(存)。
+async fn api_wb2api_config_save(Json(body): Json<Value>) -> Response {
+    let submitted = body.get("config").unwrap_or(&body);
+    match wb2api::save_wb2api_config(submitted) {
+        Ok(()) => json_ok(wb2api::load_wb2api_config()),
+        Err(e) => json_err(e.to_string(), StatusCode::BAD_REQUEST),
+    }
+}
+
+/// 上游 wb2api config.json(读)。
+async fn api_wb2api_upstream_config_get() -> Response {
+    match wb2api::upstream_config_get() {
+        Ok(v) => json_ok(v),
+        Err(e) => json_err(e, StatusCode::BAD_REQUEST),
+    }
+}
+
+/// 上游 wb2api config.json(写,自动备份)。
+async fn api_wb2api_upstream_config_save(Json(body): Json<Value>) -> Response {
+    let submitted = body.get("config").unwrap_or(&body);
+    match wb2api::upstream_config_save(submitted) {
+        Ok(v) => json_ok(v),
+        Err(e) => json_err(e, StatusCode::BAD_REQUEST),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // 静态前端
 // ---------------------------------------------------------------------------
 
@@ -816,17 +957,28 @@ fn content_type(path: &str) -> &'static str {
     }
 }
 
-async fn static_handler(uri: Uri) -> Response {
-    let mut path = uri.path().trim_start_matches('/').to_string();
-    if path.is_empty() || path == "index.html" {
-        path = "index.html".to_string();
+/// SPA 前端路由(如 /gateway)回退到 index.html;Content-Type 必须以实际命中的
+/// 资源为准,否则回退时会错给 `application/octet-stream`,浏览器把 HTML 当文件下载。
+fn static_mime_for(raw: &str) -> &'static str {
+    if raw.is_empty() || raw == "index.html" {
+        return content_type("index.html");
     }
+    if Assets::get(raw).is_some() {
+        content_type(raw)
+    } else {
+        content_type("index.html")
+    }
+}
+
+async fn static_handler(uri: Uri) -> Response {
+    let raw = uri.path().trim_start_matches('/').to_string();
+    let mime = static_mime_for(&raw);
     // 前端路由回退到 index.html
-    let data = Assets::get(&path).or_else(|| Assets::get("index.html"));
+    let data = Assets::get(&raw).or_else(|| Assets::get("index.html"));
     match data {
         Some(f) => Response::builder()
             .status(StatusCode::OK)
-            .header(header::CONTENT_TYPE, content_type(&path))
+            .header(header::CONTENT_TYPE, mime)
             .body(Body::from(f.data.into_owned()))
             .unwrap(),
         None => Response::builder()
@@ -838,7 +990,7 @@ async fn static_handler(uri: Uri) -> Response {
 
 #[cfg(test)]
 mod tests {
-    use super::{body_variant, checkin_status_item, query_variant};
+    use super::{body_variant, checkin_status_item, query_variant, static_mime_for, Assets};
     use serde_json::json;
     use wb_switch_core::modules::variant::WbVariant;
 
@@ -902,5 +1054,28 @@ mod tests {
 
         assert_eq!(item["variant"], "ai");
         assert_eq!(item["statusUnsupported"], true);
+    }
+
+    /// SPA 子路由直接请求(如浏览器刷新 /gateway)必须回退到 index.html 且用
+    /// text/html,否则浏览器会把页面当 octet-stream 下载。
+    #[test]
+    fn spa_route_fallback_serves_index_html_content_type() {
+        assert_eq!(static_mime_for("gateway"), "text/html; charset=utf-8");
+        assert_eq!(static_mime_for(""), "text/html; charset=utf-8");
+        assert_eq!(static_mime_for("index.html"), "text/html; charset=utf-8");
+        assert_eq!(static_mime_for("credit-stats"), "text/html; charset=utf-8");
+        assert_eq!(static_mime_for("token-stats"), "text/html; charset=utf-8");
+    }
+
+    /// 真实静态资源按自身扩展名判定 Content-Type。
+    #[test]
+    fn static_mime_for_real_asset_uses_its_extension() {
+        let js = Assets::iter()
+            .find(|p| p.ends_with(".js"))
+            .expect("dist 应内嵌至少一个 js 资源");
+        assert_eq!(static_mime_for(js.as_ref()), "text/javascript");
+
+        let html = Assets::iter().find(|p| p.ends_with(".html"));
+        assert!(html.is_some());
     }
 }

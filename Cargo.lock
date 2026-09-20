@@ -5449,6 +5449,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "wb-switch-gateway"
+version = "0.1.40"
+dependencies = [
+ "reqwest 0.12.28",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+ "wb-switch-core",
+]
+
+[[package]]
 name = "wb-switch-rust"
 version = "0.1.40"
 dependencies = [
@@ -5480,6 +5491,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "wb-switch-core",
+ "wb-switch-gateway",
 ]
 
 [[package]]

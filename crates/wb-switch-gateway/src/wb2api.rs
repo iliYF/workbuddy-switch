@@ -1,16 +1,16 @@
-//! wb2api 网关对接(workbuddy-hub Phase 1 管理面)。
+//! wb2api 网关对接(workbuddy-switch 网关管理面)。
 //!
-//! 对 workbuddy2api 的 HTTP 客户端 + 同机 auths/config 文件访问。复用 hub 既有的
+//! 对 workbuddy2api 的 HTTP 客户端 + 同机 auths/config 文件访问。复用 core 既有的
 //! 账号库 / OAuth / 签到 / 积分,本模块只做「推账号入池 + 拉池状态 + 运维」。
-//! 新增 hub 配置统一放 `~/.wbh`(既有 `~/.wb-switch` 零回归)。
+//! 新增配置统一放 `~/.wbh`(既有 `~/.wb-switch` 零回归)。
 
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use crate::modules::account;
-use crate::modules::config::{atomic_write, home_dir, http_request};
-use crate::modules::variant::WbVariant;
+use wb_switch_core::modules::account;
+use wb_switch_core::modules::config::{atomic_write, home_dir, http_request};
+use wb_switch_core::modules::variant::WbVariant;
 
 // ---------------------------------------------------------------------------
 // hub 数据根与对接配置(三件套,仿 config.rs 既有模式)
@@ -27,7 +27,7 @@ pub fn wb2api_config_file() -> PathBuf {
 
 pub fn default_wb2api_config() -> Value {
     json!({
-        "baseUrl": "http://127.0.0.1:7863",
+        "baseUrl": "http://127.0.0.1:54321",
         "apiKey": "",
         "authDir": "",
         "configPath": "",
@@ -748,7 +748,7 @@ mod tests {
         let defaults = default_wb2api_config();
         assert_eq!(
             defaults.get("baseUrl").and_then(Value::as_str),
-            Some("http://127.0.0.1:7863")
+            Some("http://127.0.0.1:54321")
         );
         assert_eq!(defaults.get("apiKey").and_then(Value::as_str), Some(""));
 
@@ -805,7 +805,7 @@ mod tests {
     fn wb2api_config_file_lives_under_wbh_dir() {
         assert!(wb2api_config_file().starts_with(wbh_dir()));
         assert!(wbh_dir().ends_with(".wbh"));
-        assert_ne!(wbh_dir(), crate::modules::config::store_dir(), "hub 新数据根与既有 ~/.wb-switch 分离");
+        assert_ne!(wbh_dir(), wb_switch_core::modules::config::store_dir(), "hub 新数据根与既有 ~/.wb-switch 分离");
     }
 
     #[test]

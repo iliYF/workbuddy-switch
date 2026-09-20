@@ -19,12 +19,15 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { OAuthLoginDialog } from "@/components/oauth-login-dialog";
 import * as api from "@/lib/api";
 import { asError } from "@/lib/api";
 import type {
+  GatewayConfig,
+  GatewayStatus,
   Wb2apiConfig,
   Wb2apiModel,
   Wb2apiPoolAccounts,
@@ -94,6 +97,11 @@ export default function GatewayPage() {
   const [modelQuery, setModelQuery] = useState("");
   const [catalogSource, setCatalogSource] = useState("");
 
+  // 网关托管
+  const [gw, setGw] = useState<GatewayStatus | null>(null);
+  const [gwForm, setGwForm] = useState<GatewayConfig | null>(null);
+  const [gwBusy, setGwBusy] = useState(false);
+
   const configured = Boolean(config && (config.authDir || config.baseUrl));
 
   const loadAll = useCallback(async () => {
@@ -103,6 +111,10 @@ export default function GatewayPage() {
       const cfg = await api.wb2api.getConfig();
       setConfig(cfg);
       setForm(cfg);
+      // 网关托管状态与对接配置相互独立,始终获取。
+      const gwRes = await api.wb2api.gatewayStatus().catch(() => null);
+      setGw(gwRes);
+      setGwForm((f) => f ?? gwRes?.config ?? null);
       if (cfg.authDir || cfg.baseUrl) {
         const [p, summaryRes, statsRes, catalogRes] = await Promise.all([
           api.wb2api.poolAccounts(),
@@ -212,6 +224,129 @@ export default function GatewayPage() {
       setSavingUpstream(false);
     }
   }
+
+  async function refreshGw() {
+    const s = await api.wb2api.gatewayStatus();
+    setGw(s);
+    setGwForm((f) => f ?? s.config);
+  }
+
+  async function handleGwStart() {
+    setGwBusy(true);
+    try {
+      await api.wb2api.gatewayStart();
+      toast.success("网关已启动");
+      await refreshGw();
+    } catch (e) {
+      toast.error("启动失败", { description: asError(e) });
+    } finally {
+      setGwBusy(false);
+    }
+  }
+
+  async function handleGwStop() {
+    setGwBusy(true);
+    try {
+      await api.wb2api.gatewayStop();
+      toast.success("网关已停止");
+      await refreshGw();
+    } catch (e) {
+      toast.error("停止失败", { description: asError(e) });
+    } finally {
+      setGwBusy(false);
+    }
+  }
+
+  async function handleGwSaveConfig() {
+    if (!gwForm) return;
+    try {
+      const saved = await api.wb2api.gatewaySaveConfig(gwForm);
+      setGwForm(saved);
+      toast.success("网关配置已保存");
+    } catch (e) {
+      toast.error("保存失败", { description: asError(e) });
+    }
+  }
+
+  const [syncResult, setSyncResult] = useState("");
+
+  async function handleGwSync() {
+    setGwBusy(true);
+    try {
+      const res = await api.wb2api.gatewaySyncNow();
+      setSyncResult(
+        res.error
+          ? `同步失败: ${res.error}`
+          : `已导出 ${res.exported} 个、清理 ${res.removed} 个(共 ${res.accounts} 个账号)`,
+      );
+      toast.success("账号已同步到网关 auths");
+    } catch (e) {
+      toast.error("同步失败", { description: asError(e) });
+    } finally {
+      setGwBusy(false);
+    }
+  }
+
+  const [gwUpdateMsg, setGwUpdateMsg] = useState("");
+  const [gwUpdating, setGwUpdating] = useState(false);
+
+  async function handleGwCheckUpdate() {
+    setGwUpdating(true);
+    try {
+      const r = await api.wb2api.gatewayCheckUpdate();
+      setGwUpdateMsg(
+        r.available ? `更新可用: ${r.path || r.url || ""}${r.size ? ` (${r.size} 字节)` : ""}` : `无可用更新: ${r.message ?? ""}`,
+      );
+    } catch (e) {
+      setGwUpdateMsg(asError(e));
+    } finally {
+      setGwUpdating(false);
+    }
+  }
+
+  async function handleGwApplyUpdate() {
+    setGwUpdating(true);
+    try {
+      const r = await api.wb2api.gatewayApplyUpdate();
+      setGwUpdateMsg(
+        r.ok
+          ? `已更新 ${r.bin}(${r.size} 字节)${r.restarted ? ",网关已重启" : ""}${r.restart_error ? `,重启失败: ${r.restart_error}` : ""}`
+          : "更新失败",
+      );
+      await refreshGw();
+    } catch (e) {
+      setGwUpdateMsg(`更新失败: ${asError(e)}`);
+    } finally {
+      setGwUpdating(false);
+    }
+  }
+
+  async function handleGwPickPort() {
+    try {
+      const r = await api.wb2api.gatewayPickPort();
+      setGwForm((f) => (f ? { ...f, port: r.port } : f));
+      toast.success(`已选空闲端口 ${r.port}`);
+    } catch (e) {
+      toast.error("选端口失败", { description: asError(e) });
+    }
+  }
+
+  /** 勾选/取消某账号入网关池(持久化到 gateway.json pool_uids)。 */
+  async function togglePoolUid(uid: string) {
+    if (!gwForm || !uid) return;
+    const cur = gwForm.pool_uids ?? [];
+    const next = cur.includes(uid) ? cur.filter((u) => u !== uid) : [...cur, uid];
+    try {
+      const saved = await api.wb2api.gatewaySaveConfig({ ...gwForm, pool_uids: next });
+      setGwForm(saved);
+      toast.success(next.includes(uid) ? "已加入网关池选择" : "已移出网关池选择");
+    } catch (e) {
+      toast.error("保存失败", { description: asError(e) });
+    }
+  }
+
+  const setGwField = (key: keyof GatewayConfig) => (e: ChangeEvent<HTMLInputElement>) =>
+    setGwForm((f) => (f ? { ...f, [key]: e.target.value } : f));
 
   const onboardOptions = useMemo(
     () =>
@@ -432,6 +567,7 @@ export default function GatewayPage() {
           <TabsTrigger value="pool">池账号</TabsTrigger>
           <TabsTrigger value="stats">统计</TabsTrigger>
           <TabsTrigger value="config">配置</TabsTrigger>
+          <TabsTrigger value="manage">托管</TabsTrigger>
         </TabsList>
 
         <TabsContent value="pool" className="space-y-4">
@@ -478,6 +614,31 @@ export default function GatewayPage() {
                     <Button variant="outline" onClick={() => setOauthOpen(true)}>
                       <ArrowLeftRight className="size-4" /> 扫码新增账号
                     </Button>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>
+                      自动同步入池的账号(需在「托管」开启自动同步;未勾选不会被自动加入网关池,避免主账号风险)
+                    </Label>
+                    {localAccounts.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">本地账号库为空,请先扫码添加</p>
+                    ) : (
+                      <div className="grid gap-1.5 sm:grid-cols-2">
+                        {localAccounts.map((acc) => {
+                          const uid = acc.uid ?? "";
+                          const checked = (gwForm?.pool_uids ?? []).includes(uid);
+                          return (
+                            <label key={acc.id} className="flex items-center gap-2 text-sm">
+                              <Switch
+                                checked={checked}
+                                onCheckedChange={() => void togglePoolUid(uid)}
+                                disabled={!uid}
+                              />
+                              {acc.nickname || acc.email || acc.uid || acc.id}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -740,6 +901,146 @@ export default function GatewayPage() {
               />
               <Button onClick={() => void handleSaveUpstream()} disabled={savingUpstream || !upstreamText}>
                 {savingUpstream ? "保存中…" : "保存 config.json"}
+              </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="manage" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">网关托管</CardTitle>
+              <CardDescription>
+                托管独立的 workbuddy2api 二进制:起停/健康/端口/工作模式;升级走独立通道,与客户端解耦。
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-wrap items-center gap-3">
+                <Badge variant={gw?.running ? (gw.healthy ? "default" : "destructive") : "secondary"}>
+                  {gw?.running ? (gw.healthy ? "运行中" : "运行但不健康") : "未运行"}
+                </Badge>
+                <span className="text-sm text-muted-foreground">端口 {gw?.port ?? gwForm?.port ?? 7863}</span>
+                {gw?.bin && <span className="text-xs text-muted-foreground">{gw.bin}</span>}
+                <div className="ml-auto flex gap-2">
+                  <Button size="sm" variant="outline" onClick={() => void handleGwSync()} disabled={gwBusy}>
+                    立即同步账号
+                  </Button>
+                  <Button size="sm" onClick={() => void handleGwStart()} disabled={gwBusy || gw?.running}>
+                    {gwBusy ? "处理中…" : "启动"}
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => void handleGwStop()} disabled={gwBusy || !gw?.running}>
+                    停止
+                  </Button>
+                </div>
+              </div>
+              {syncResult && <p className="text-sm text-muted-foreground">{syncResult}</p>}
+
+              <Separator />
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label>bin_path(留空自动找 ~/.wbh/gateway/bin)</Label>
+                  <Input value={gwForm?.bin_path ?? ""} onChange={setGwField("bin_path")} placeholder="/path/to/wb2api" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>端口(预设/自由设置)</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      type="number"
+                      className="w-28"
+                      value={gwForm?.port ?? 54321}
+                      onChange={(e) =>
+                        setGwForm((f) => (f ? { ...f, port: Number(e.target.value) || 54321 } : f))
+                      }
+                    />
+                    <Select
+                      onValueChange={(v) =>
+                        setGwForm((f) => (f ? { ...f, port: Number(v) } : f))
+                      }
+                    >
+                      <SelectTrigger className="w-32">
+                        <SelectValue placeholder="预设端口" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="54321">54321(默认)</SelectItem>
+                        <SelectItem value="7863">7863</SelectItem>
+                        <SelectItem value="17863">17863</SelectItem>
+                        <SelectItem value="54320">54320</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Button size="sm" variant="outline" onClick={() => void handleGwPickPort()}>
+                      自动
+                    </Button>
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>api_key(留空=不鉴权)</Label>
+                  <Input value={gwForm?.api_key ?? ""} onChange={setGwField("api_key")} type="password" placeholder="留空=不鉴权" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>升级源 update_source(二进制 URL 或本地路径)</Label>
+                  <Input value={gwForm?.update_source ?? ""} onChange={setGwField("update_source")} placeholder="https://…/wb2api 或 /path/to/wb2api" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>工作模式</Label>
+                  <Select
+                    value={gwForm?.mode ?? "balance"}
+                    onValueChange={(v) => setGwForm((f) => (f ? { ...f, mode: v as GatewayConfig["mode"] } : f))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="balance">负载均衡</SelectItem>
+                      <SelectItem value="pinned">指定账号</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {gwForm?.mode === "pinned" && (
+                  <div className="space-y-1.5">
+                    <Label>指定账号 uid</Label>
+                    <Input
+                      value={gwForm?.pinned_uid ?? ""}
+                      onChange={(e) => setGwForm((f) => (f ? { ...f, pinned_uid: e.target.value } : f))}
+                      placeholder="账号 uid"
+                    />
+                  </div>
+                )}
+                <div className="flex items-end gap-4">
+                  <label className="flex items-center gap-2 text-sm">
+                    <Switch
+                      checked={gwForm?.auto_start ?? false}
+                      onCheckedChange={(v) => setGwForm((f) => (f ? { ...f, auto_start: v } : f))}
+                    />
+                    随 App 启动
+                  </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    <Switch
+                      checked={gwForm?.sync_enabled ?? false}
+                      onCheckedChange={(v) => setGwForm((f) => (f ? { ...f, sync_enabled: v } : f))}
+                    />
+                    自动同步勾选账号入池(默认关)
+                  </label>
+                </div>
+              </div>
+
+              <Separator />
+
+              <div className="space-y-2">
+                <div className="font-medium text-sm">网关独立升级(与客户端升级解耦)</div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button size="sm" variant="outline" onClick={() => void handleGwCheckUpdate()} disabled={gwUpdating}>
+                    {gwUpdating ? "处理中…" : "检查更新"}
+                  </Button>
+                  <Button size="sm" onClick={() => void handleGwApplyUpdate()} disabled={gwUpdating}>
+                    下载并替换(可选 sha256 校验,网关在跑则重启)
+                  </Button>
+                </div>
+                {gwUpdateMsg && <p className="text-sm text-muted-foreground">{gwUpdateMsg}</p>}
+              </div>
+
+              <Button onClick={() => void handleGwSaveConfig()} disabled={!gwForm}>
+                保存网关配置
               </Button>
             </CardContent>
           </Card>

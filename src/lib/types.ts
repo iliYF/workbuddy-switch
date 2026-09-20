@@ -653,6 +653,54 @@ export interface Wb2apiModelCatalog {
   realm: string;
 }
 
+/** 网关托管配置(`~/.wbh/gateway.json`)。 */
+export interface GatewayConfig {
+  enabled: boolean;
+  /** wb2api 二进制路径;空则从 ~/.wbh/gateway/bin 查找。 */
+  bin_path: string;
+  port: number;
+  api_key: string;
+  /** 负载均衡 / 指定账号(后者由账号单向推送据此只导出 pinned_uid)。 */
+  mode: "balance" | "pinned";
+  pinned_uid: string | null;
+  auto_start: boolean;
+  /** 网关独立升级源:二进制 URL 或本地文件路径。 */
+  update_source: string;
+  /** 自动同步开关(默认关):开启后才把 pool_uids 里勾选的账号推入网关池。 */
+  sync_enabled: boolean;
+  /** 用户勾选入池的账号 uid 集合。 */
+  pool_uids: string[];
+}
+
+/** 网关升级检查结果。 */
+export interface GatewayUpdateCheck {
+  available: boolean;
+  message?: string;
+  source?: string;
+  path?: string;
+  url?: string;
+  size?: number;
+}
+
+/** 网关升级应用结果。 */
+export interface GatewayUpdateResult {
+  ok: boolean;
+  bin: string;
+  size: number;
+  restarted?: boolean;
+  status?: unknown;
+  restart_error?: string;
+}
+
+/** 网关托管状态:进程/健康/端口/二进制 + 当前配置。 */
+export interface GatewayStatus {
+  running: boolean;
+  healthy: boolean;
+  port: number;
+  bin?: string | null;
+  config: GatewayConfig;
+}
+
 /** admin 端点响应体。 */
 export interface Wb2apiAdminState {
   uid: string;

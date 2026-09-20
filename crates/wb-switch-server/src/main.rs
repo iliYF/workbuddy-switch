@@ -14,9 +14,10 @@ use serde_json::json;
 use wb_switch_core::modules::{
     account, auth_file, checkin, config, process, rotate, travel, update, variant::WbVariant,
 };
+use wb_switch_gateway::account_sync;
 
 fn default_port() -> u16 {
-    57890
+    54320
 }
 
 /// 后台任务：自动签到启动即核验、每 30 分钟补签；自动轮换按配置间隔执行；
@@ -74,6 +75,14 @@ fn spawn_background_loops() {
     // 限额 hook 信号：轮询 `~/.wb-switch/hook-events.jsonl`，入账后由前端下次拉取可见。
     // webui 没有 Tauri 事件通道，因此不需要推送回调（桌面端见 src-tauri/src/lib.rs）。
     wb_switch_core::modules::rate_limit_events::spawn_watcher(|| {});
+
+    // 账号单向推送：30s 巡检账号库指纹，变化则导出到网关 auths（网关 5s 热加载）。
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            let _ = account_sync::sync_if_changed();
+        }
+    });
 
     // 默认接入：后台线程自动安装 hook（幂等、非阻塞、失败静默）；
     // 装上了就作废扫描缓存——扫描范围从全量收窄到「未注册的来源」。

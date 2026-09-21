@@ -1,6 +1,6 @@
 //! wb2api 网关管理路由:对接 workbuddy2api、网关托管、账号单向推送 的 HTTP 层。
 //!
-//! 独立成文件,`api.rs` 只 `.merge(wb2api_routes::router())`,保持既有文件低侵入。
+//! 独立成文件,`api.rs` 只 `.merge(wb2api::router())`,保持既有文件低侵入。
 
 use axum::extract::{Path, RawQuery};
 use axum::http::StatusCode;
@@ -39,6 +39,7 @@ pub fn router() -> Router {
         .route("/api/wb2api/gateway/update/check", get(api_gateway_update_check))
         .route("/api/wb2api/gateway/update", post(api_gateway_update_apply))
         .route("/api/wb2api/gateway/pick-port", post(api_gateway_pick_port))
+        .route("/api/wb2api/gateway/port-check", get(api_gateway_port_check))
         .route("/api/wb2api/gateway/gen-key", post(api_gateway_gen_key))
         // 账号单向推送
         .route("/api/wb2api/sync/now", post(api_sync_now))
@@ -161,9 +162,22 @@ async fn api_gateway_update_apply(Json(body): Json<Value>) -> Response {
     }
 }
 
-/// 自动挑选一个空闲端口(从 54321 起)。
+/// 自动挑选一个随机空闲端口(从 7863 起探测,范围 100)。
 async fn api_gateway_pick_port() -> Response {
-    json_ok(json!({ "port": gateway_manage::pick_free_port(54321) }))
+    json_ok(json!({ "port": gateway_manage::pick_random_free_port(7863, 100) }))
+}
+
+/// 探测某端口是否可绑定(供前端服务端口可用性指示;0 或缺省视为不可用)。
+async fn api_gateway_port_check(RawQuery(query): RawQuery) -> Response {
+    let port = query
+        .as_deref()
+        .and_then(|q| q.split('&').find_map(|kv| kv.strip_prefix("port=")))
+        .and_then(|v| v.parse::<u16>().ok())
+        .unwrap_or(0);
+    json_ok(json!({
+        "port": port,
+        "available": port != 0 && gateway_manage::port_available(port),
+    }))
 }
 
 /// 生成一个网关访问密钥(wbs- 前缀)。

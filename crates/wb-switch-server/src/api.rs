@@ -144,7 +144,7 @@ pub fn router() -> Router {
             get(api_update_config).post(api_save_update_config),
         )
         // workbuddy-hub 网关对接(workbuddy2api 管理面,additive 路由段)
-                .merge(crate::wb2api_routes::router())
+        .merge(crate::wb2api::router())
 
         .fallback(static_handler)
 }

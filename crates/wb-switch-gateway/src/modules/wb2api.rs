@@ -21,8 +21,11 @@ pub fn gateway_root() -> PathBuf {
     home_dir().join(".wb-switch").join("gateway")
 }
 
+/// 本 fork 创建的网关文件/目录统一前缀,避免与其他 fork 共用网关目录时撞名。
+pub const GATEWAY_PREFIX: &str = "wbs_";
+
 pub fn wb2api_config_file() -> PathBuf {
-    gateway_root().join("wb2api.json")
+    gateway_root().join(format!("{GATEWAY_PREFIX}wb2api.json"))
 }
 
 pub fn default_wb2api_config() -> Value {
@@ -204,6 +207,12 @@ fn parse_pool_auth(text: &str) -> Option<Value> {
     if let Some(dt) = root.get("device_token").and_then(Value::as_str) {
         if !dt.trim().is_empty() {
             entry["deviceToken"] = json!(dt);
+        }
+    }
+    // 透出 auth 文件里的分层选号依据(网关写入的积分/到期信息),缺失不影响解析。
+    if let Some(credit) = root.get("credit") {
+        if credit.is_object() {
+            entry["credit"] = credit.clone();
         }
     }
     Some(entry)

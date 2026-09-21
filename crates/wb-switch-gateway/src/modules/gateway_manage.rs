@@ -11,7 +11,7 @@ use std::sync::Mutex;
 
 use wb_switch_core::modules::config::{atomic_write, http_request, http_request_raw};
 
-use crate::modules::wb2api::{gateway_root, GATEWAY_PREFIX};
+use crate::modules::wb2api::{gateway_root, DEFAULT_GATEWAY_PORT, GATEWAY_PREFIX};
 
 /// 进程句柄:server 进程内单例(与账号库并发写一致,单实例保护由宿主负责)。
 static GATEWAY_PROC: Mutex<Option<Child>> = Mutex::new(None);
@@ -46,7 +46,7 @@ pub fn default_gateway_config() -> Value {
     json!({
         "enabled": false,
         "bin_path": "",
-        "port": 54321,
+        "port": DEFAULT_GATEWAY_PORT,
         // 访问密钥默认自动生成一个(网关必须鉴权,不允许留空)。
         "api_key": generate_api_key(),
         "mode": "balance",
@@ -210,7 +210,10 @@ pub fn save_gateway_config(cfg: &Value) -> std::io::Result<()> {
 
 /// 把网关配置派生进 wb2api 对接配置(端口→baseUrl,api_key→apiKey,凭证目录→authDir)。
 fn write_derived_wb2api_config(gw: &Value) {
-    let port = gw.get("port").and_then(Value::as_i64).unwrap_or(54321);
+    let port = gw
+        .get("port")
+        .and_then(Value::as_i64)
+        .unwrap_or(DEFAULT_GATEWAY_PORT as i64);
     let api_key = gw.get("api_key").and_then(Value::as_str).unwrap_or("");
     let derived = json!({
         "baseUrl": format!("http://127.0.0.1:{port}"),
@@ -234,7 +237,7 @@ fn cfg_port() -> u16 {
     load_gateway_config()
         .get("port")
         .and_then(Value::as_i64)
-        .unwrap_or(54321)
+        .unwrap_or(DEFAULT_GATEWAY_PORT as i64)
         .clamp(1, 65535) as u16
 }
 
@@ -265,6 +268,13 @@ pub fn locate_gateway() -> Option<PathBuf> {
     None
 }
 
+/// 自动选端口的候选下限(避开常见开发端口)。
+pub const PORT_PICK_BASE: u16 = 7863;
+/// 端口候选上限(65535 为 TCP 端口最大值)。
+pub const PORT_PICK_MAX: u16 = 65535;
+/// 随机采样尝试次数上限:避免端口大量被占时逐个探测过久。
+const PORT_PICK_TRIES: usize = 50;
+
 /// 端口是否空闲(尝试绑定 127.0.0.1)。
 pub fn port_available(port: u16) -> bool {
     std::net::TcpListener::bind(("127.0.0.1", port)).is_ok()
@@ -291,11 +301,11 @@ fn random_seed() -> u64 {
     x
 }
 
-/// 从 `base` 起随机挑一个空闲端口:在 [base, base+range) 内从随机起点逐个探测可用性。
-pub fn pick_random_free_port(base: u16, range: u16) -> u16 {
-    let start = (random_seed() % range as u64) as u16;
-    for i in 0..range {
-        let candidate = base + ((start + i) % range);
+/// 在 [base, max] 内随机采样空闲端口:最多尝试 `PORT_PICK_TRIES` 次,未命中回落 `base`。
+pub fn pick_random_free_port(base: u16, max: u16) -> u16 {
+    let span = max.saturating_sub(base) as u64 + 1;
+    for _ in 0..PORT_PICK_TRIES {
+        let candidate = base + (random_seed() % span) as u16;
         if port_available(candidate) {
             return candidate;
         }
@@ -693,7 +703,10 @@ mod tests {
     #[test]
     fn gateway_config_defaults_and_keeps_known_fields() {
         let defaults = default_gateway_config();
-        assert_eq!(defaults.get("port").and_then(Value::as_i64), Some(54321));
+        assert_eq!(
+            defaults.get("port").and_then(Value::as_i64),
+            Some(DEFAULT_GATEWAY_PORT as i64)
+        );
         assert_eq!(defaults.get("mode").and_then(Value::as_str), Some("balance"));
         assert_eq!(defaults.get("enabled").and_then(Value::as_bool), Some(false));
         assert_eq!(
@@ -742,7 +755,11 @@ mod tests {
     #[test]
     fn gateway_config_rejects_bad_port() {
         let merged = merge_gateway_config(&json!({ "port": 99999 }));
-        assert_eq!(merged.get("port").and_then(Value::as_i64), Some(54321), "越界端口保持默认");
+        assert_eq!(
+            merged.get("port").and_then(Value::as_i64),
+            Some(DEFAULT_GATEWAY_PORT as i64),
+            "越界端口保持默认"
+        );
     }
 
     #[test]
@@ -753,9 +770,12 @@ mod tests {
 
     #[test]
     fn pick_random_free_port_finds_an_available_one_in_range() {
-        for _ in 0..5 {
-            let p = pick_random_free_port(7863, 100);
-            assert!((7863..7963).contains(&p), "应在 7863 起的 100 个端口范围内,实际 {p}");
+        for _ in 0..20 {
+            let p = pick_random_free_port(PORT_PICK_BASE, PORT_PICK_MAX);
+            assert!(
+                (PORT_PICK_BASE..=PORT_PICK_MAX).contains(&p),
+                "应在 {PORT_PICK_BASE}..={PORT_PICK_MAX} 端口范围内,实际 {p}"
+            );
             assert!(port_available(p), "随机挑出的端口应探测为空闲");
         }
     }

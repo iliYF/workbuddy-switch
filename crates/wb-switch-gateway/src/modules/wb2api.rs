@@ -24,13 +24,16 @@ pub fn gateway_root() -> PathBuf {
 /// 本 fork 创建的网关文件/目录统一前缀,避免与其他 fork 共用网关目录时撞名。
 pub const GATEWAY_PREFIX: &str = "wbs_";
 
+/// 网关默认监听端口:与宿主 webui 默认端口(57890,fork 构建产物 54320)相邻。
+pub const DEFAULT_GATEWAY_PORT: u16 = 54321;
+
 pub fn wb2api_config_file() -> PathBuf {
     gateway_root().join(format!("{GATEWAY_PREFIX}wb2api.json"))
 }
 
 pub fn default_wb2api_config() -> Value {
     json!({
-        "baseUrl": "http://127.0.0.1:54321",
+        "baseUrl": format!("http://127.0.0.1:{DEFAULT_GATEWAY_PORT}"),
         "apiKey": "",
         "authDir": "",
         "configPath": "",
@@ -755,9 +758,10 @@ mod tests {
     #[test]
     fn wb2api_config_defaults_and_keeps_known_fields() {
         let defaults = default_wb2api_config();
+        let default_base = format!("http://127.0.0.1:{DEFAULT_GATEWAY_PORT}");
         assert_eq!(
             defaults.get("baseUrl").and_then(Value::as_str),
-            Some("http://127.0.0.1:54321")
+            Some(default_base.as_str())
         );
         assert_eq!(defaults.get("apiKey").and_then(Value::as_str), Some(""));
 

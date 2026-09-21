@@ -3,61 +3,141 @@
 #
 # 用法: sh scripts/apply-patch.sh
 # 幂等:已应用过的目标打印 skip 并正常退出;重复运行安全。
-# 还原: git checkout -- src-tauri/tauri.conf.json crates/wb-switch-core/src/modules/update.rs src/lib/update.ts package.json src/lib/server-base.ts crates/wb-switch-server/src/main.rs
 #
-# 变更内容(与 fork 仓库 iliYF/workbuddy-switch 配套):
-#   src-tauri/tauri.conf.json        identifier → FORK_IDENTIFIER;更新源 → FORK_OWNER;pubkey → FORK_PUBKEY
-#   crates/.../modules/update.rs     GITHUB_OWNER 常量 → FORK_OWNER(不碰旧 changexbc 迁移逻辑)
-#   src/lib/update.ts                GITHUB_OWNER → FORK_OWNER
-#   package.json                     build:app 密钥文件 → FORK_KEY_FILE;密码 → 读 $TAURI_SIGNING_PRIVATE_KEY_PASSWORD 环境变量(密码不落库)
-#   src/lib/server-base.ts           API_BASE 端口 57890 → FORK_PORT(源码保持上游默认,构建产物用 fork 端口)
-#   crates/.../main.rs               default_port() 57890 → FORK_PORT
+# 结构:
+#   ① 替换对照:上游原始值(UPSTREAM_*) → fork 值,集中一处便于对比
+#   ② 按功能域分组(WEB 前端 / DESKTOP 桌面 / SERVER 服务),每类一个数组 + patch_* 函数
+# 还原(重置所有被补丁文件):
+#   git checkout -- "${WEB_FILES[@]}" "${DESKTOP_FILES[@]}" "${SERVER_FILES[@]}"
 set -euo pipefail
 
-# fork 身份(保持与 fork 仓库一致)
-FORK_IDENTIFIER="com.xstart.wbswitch"
-FORK_OWNER="iliYF"
-FORK_REPO="workbuddy-switch"
-FORK_PUBKEY="dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQzNEVGMDQwMDQyQjlCNUEKUldSYW15c0VRUEJPMCtLdytNSUYzOFYrTXVGS0lsOGV3R1E2T1hoWVp1TnJFVGYyblZtdTNFaHoK"
+# ── ① 替换对照:上游原始值 → fork 值 ──
+UPSTREAM_BUNDLE_ID="com.wbswitch.app"              # → $BUNDLE_ID
+UPSTREAM_OWNER="changexbc"                         # → $GITHUB_OWNER
+UPSTREAM_PUBKEY="dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEYwNEU4RkQ5OEZCN0FGRApSV1Q5ZXZ1WS9lZ0VEd1VuVFpOYjU1OGJGd1NmMVhaWHJTSEdnNVRSSEcweUxWR05TN0h2WnloSwo="  # → $UPDATER_PUBKEY
+UPSTREAM_KEY_FILE="wb-switch-updater.key"          # → $SIGNING_KEY_FILE
+UPSTREAM_PASSWORD="wb-switch-dev"                  # → 环境变量 TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+UPSTREAM_PORT="57890"                              # → $APP_PORT
+UPSTREAM_PRODUCT="workbuddy-switch"                # → $PRODUCT_NAME
+UPSTREAM_TITLE="workbuddy-switch · WorkBuddy 账号切换"  # → $PRODUCT_TITLE
+
+# ── fork 值(替换目标)──
+BUNDLE_ID="com.xstart.wbswitch"
+GITHUB_OWNER="iliYF"
+GITHUB_REPO="workbuddy-switch"
+UPDATER_PUBKEY="dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQzNEVGMDQwMDQyQjlCNUEKUldSYW15c0VRUEJPMCtLdytNSUYzOFYrTXVGS0lsOGV3R1E2T1hoWVp1TnJFVGYyblZtdTNFaHoK"
 # 签名密钥文件名(与 ~/.wb-switch 下生成的密钥对配套;密码只在环境变量/Secret,不写进仓库)
-FORK_KEY_FILE="wb-switch-gw.key"
+SIGNING_KEY_FILE="wb-switch-gw.key"
 # fork 端口:与网关默认端口 54321 相邻,避免与上游默认 57890 撞端口。
-FORK_PORT="54320"
+APP_PORT="54320"
+# 产品名:显示在打包 .app 名/窗口/托盘/通知/侧栏。
+PRODUCT_NAME="WB Switch"
+PRODUCT_TITLE="$PRODUCT_NAME · WorkBuddy 账号管理 + 兼容网关"
+# 主二进制/exe 名:保持上游完整名 workbuddy-switch,现有自识别条件(匹配 workbuddy-switch/wb-switch)天然覆盖。
+MAIN_BINARY="workbuddy-switch"
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
 
-# 幂等替换: $1=文件 $2=旧值 $3=新值
+# ── ② 按功能域分组:变更文件集中声明 ──
+# WEB:webui 前端(浏览器与桌面 webview 共用)——标题/API 地址/更新源/品牌/标题栏
+WEB_FILES=(index.html src/lib/api.ts src/lib/update.ts src/App.tsx)
+# DESKTOP:Tauri 桌面壳——身份/产品名/标题栏/托盘/通知/进程自识别/打包签名
+DESKTOP_FILES=(
+  src-tauri/tauri.conf.json
+  src-tauri/src/tray.rs
+  package.json
+  scripts/fix-app.sh
+  crates/wb-switch-core/src/modules/rotate.rs
+)
+# SERVER:本地服务——更新源身份、默认端口
+SERVER_FILES=(
+  crates/wb-switch-core/src/modules/update.rs
+  crates/wb-switch-server/src/main.rs
+)
+
+# 幂等替换: $1=仓库相对路径 $2=旧值 $3=新值
 # grep 用固定字符串探测;perl 用 \Q\E 转义 + {} 定界(base64 含 /)。
 replace() {
-  local file="$1" from="$2" to="$3"
+  local file="$ROOT/$1" from="$2" to="$3"
   if [ ! -f "$file" ]; then
-    echo "skip: 文件不存在 $file"
+    echo "skip: 文件不存在 $1"
     return 0
   fi
   if grep -qF -- "$from" "$file"; then
     perl -pi -e "s{\Q$from\E}{$to}g" -- "$file"
-    echo "patched: ${file#$ROOT/} :: ${from:0:40}... -> ${to:0:40}..."
+    echo "patched: $1 :: ${from:0:40}... -> ${to:0:40}..."
   else
-    echo "skip(已应用或未找到): ${file#$ROOT/} :: ${from:0:40}..."
+    echo "skip(已应用或未找到): $1 :: ${from:0:40}..."
   fi
 }
 
-replace "$ROOT/src-tauri/tauri.conf.json" "com.wbswitch.app" "$FORK_IDENTIFIER"
-replace "$ROOT/src-tauri/tauri.conf.json" "github.com/changexbc/" "github.com/$FORK_OWNER/"
-replace "$ROOT/src-tauri/tauri.conf.json" \
-  "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEYwNEU4RkQ5OEZCN0FGRApSV1Q5ZXZ1WS9lZ0VEd1VuVFpOYjU1OGJGd1NmMVhaWHJTSEdnNVRSSEcweUxWR05TN0h2WnloSwo=" \
-  "$FORK_PUBKEY"
-replace "$ROOT/crates/wb-switch-core/src/modules/update.rs" \
-  'GITHUB_OWNER: &str = "changexbc"' "GITHUB_OWNER: &str = \"$FORK_OWNER\""
-replace "$ROOT/src/lib/update.ts" \
-  'GITHUB_OWNER = "changexbc"' "GITHUB_OWNER = \"$FORK_OWNER\""
-replace "$ROOT/package.json" "wb-switch-updater.key" "$FORK_KEY_FILE"
-# 密码改成读环境变量,不内嵌值(仓库里不出现密码;CI 用 Secret,本地用 export)
-replace "$ROOT/package.json" \
-  "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=wb-switch-dev" \
-  'TAURI_SIGNING_PRIVATE_KEY_PASSWORD=\${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:?}'
-# fork 端口:webui 前端地址与 server 默认端口都替换(源码保持上游 57890)。
-replace "$ROOT/src/lib/server-base.ts" "http://127.0.0.1:57890" "http://127.0.0.1:$FORK_PORT"
-replace "$ROOT/crates/wb-switch-server/src/main.rs" "57890" "$FORK_PORT"
+# 预检:数组声明的文件都应存在(缺失即报错退出)。
+check_files() {
+  local type="$1"; shift
+  for f in "$@"; do
+    [ -f "$ROOT/$f" ] || { echo "error: 缺失文件 $type::$f" >&2; exit 1; }
+  done
+}
 
-echo "apply-patch done: $FORK_OWNER/$FORK_REPO, identifier=$FORK_IDENTIFIER"
+# ── WEB:webui 前端 ──
+patch_web() {
+  # 浏览器/桌面 webview 共用的页面标题
+  replace index.html "$UPSTREAM_TITLE" "$PRODUCT_TITLE"
+  # webui API 地址端口
+  replace src/lib/api.ts "http://127.0.0.1:$UPSTREAM_PORT" "http://127.0.0.1:$APP_PORT"
+  # 前端更新源 owner
+  replace src/lib/update.ts "GITHUB_OWNER = \"$UPSTREAM_OWNER\"" "GITHUB_OWNER = \"$GITHUB_OWNER\""
+  # 原生标题栏接管后,自绘拖拽区/Overlay 间距关闭;侧栏品牌同步
+  replace src/App.tsx \
+    'api.isDesktop() && typeof navigator !== "undefined" && navigator.userAgent.includes("Macintosh")' \
+    'false'
+  replace src/App.tsx "WorkBuddy Switch" "$PRODUCT_NAME"
+}
+
+# ── DESKTOP:Tauri 桌面壳 ──
+patch_desktop() {
+  # tauri.conf.json:身份(bundle id/更新源/签名公钥)+ 产品名 + 原生标题栏
+  replace src-tauri/tauri.conf.json "$UPSTREAM_BUNDLE_ID" "$BUNDLE_ID"
+  replace src-tauri/tauri.conf.json "github.com/$UPSTREAM_OWNER/" "github.com/$GITHUB_OWNER/"
+  replace src-tauri/tauri.conf.json "$UPSTREAM_PUBKEY" "$UPDATER_PUBKEY"
+  # 主二进制名独立于产品名(保持完整 workbuddy-switch),现有自识别条件天然覆盖,无需改 Rust。
+  replace src-tauri/tauri.conf.json "\"productName\": \"$UPSTREAM_PRODUCT\"" \
+    "\"productName\": \"$PRODUCT_NAME\",
+  \"mainBinaryName\": \"$MAIN_BINARY\""
+  replace src-tauri/tauri.conf.json "\"title\": \"$UPSTREAM_TITLE\"" "\"title\": \"$PRODUCT_TITLE\""
+  # 原生可见标题栏(标题显示在系统标题栏,不依赖自绘),仅 macOS fork 生效。
+  replace src-tauri/tauri.conf.json '"titleBarStyle": "Overlay"' '"titleBarStyle": "Visible"'
+  replace src-tauri/tauri.conf.json '"hiddenTitle": true' '"hiddenTitle": false'
+  # 托盘 tooltip
+  replace src-tauri/src/tray.rs "\"$UPSTREAM_PRODUCT\"" "\"$PRODUCT_NAME\""
+  # package.json:签名密钥文件 + 密码改读环境变量(不内嵌;CI 用 Secret,本地 export)
+  replace package.json "$UPSTREAM_KEY_FILE" "$SIGNING_KEY_FILE"
+  replace package.json \
+    "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$UPSTREAM_PASSWORD" \
+    'TAURI_SIGNING_PRIVATE_KEY_PASSWORD=\${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:?}'
+  # 本地 build:app 收尾 fix-app.sh 按 .app 目录名找包(CI 侧 make-dmg 走 ci 分支另行对齐)
+  replace scripts/fix-app.sh "bundle/macos/$UPSTREAM_PRODUCT.app" "bundle/macos/$PRODUCT_NAME.app"
+  # 桌面通知标题(core 组装 + 宿主兜底)
+  replace crates/wb-switch-core/src/modules/rotate.rs \
+    "ROTATE_NOTIFY_TITLE: &str = \"$UPSTREAM_PRODUCT\"" "ROTATE_NOTIFY_TITLE: &str = \"$PRODUCT_NAME\""
+  replace crates/wb-switch-core/src/modules/rotate.rs \
+    "assert_eq!(notify[\"title\"], json!(\"$UPSTREAM_PRODUCT\"))" "assert_eq!(notify[\"title\"], json!(\"$PRODUCT_NAME\"))"
+}
+
+# ── SERVER:本地服务(更新源身份/默认端口)──
+patch_server() {
+  replace crates/wb-switch-core/src/modules/update.rs \
+    "GITHUB_OWNER: &str = \"$UPSTREAM_OWNER\"" "GITHUB_OWNER: &str = \"$GITHUB_OWNER\""
+  replace crates/wb-switch-server/src/main.rs "$UPSTREAM_PORT" "$APP_PORT"
+}
+
+# ── 主流程:预检文件齐全 → 按功能域逐个打补丁 ──
+check_files WEB "${WEB_FILES[@]}"
+check_files DESKTOP "${DESKTOP_FILES[@]}"
+check_files SERVER "${SERVER_FILES[@]}"
+
+patch_web
+patch_desktop
+patch_server
+
+echo "apply-patch done: $GITHUB_OWNER/$GITHUB_REPO, identifier=$BUNDLE_ID, product=$PRODUCT_NAME"

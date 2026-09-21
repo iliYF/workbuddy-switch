@@ -1,8 +1,11 @@
 //! 网关管理 API 客户端(workbuddy2api 对接)。
 //!
-//! 独立成文件,`api.ts` 不再堆网关相关代码;此处只服务 webui(不走 Tauri 双通道)。
+//! 双通道:webui 直连本地 server 的 /api/wb2api/* 路由;桌面 App 走 Tauri invoke。
+//! 与 api.ts 的 call() 结构一致,网关页在两种形态下同样可用。
 
-import { DEMO_UNAVAILABLE_MESSAGE, demoModeEnabled } from "./demo-mode";
+import { invoke } from "@tauri-apps/api/core";
+import { demoModeEnabled } from "./demo-mode";
+import { gatewayDemoResponse } from "./gateway-demo";
 import type { WB2APIAdminState, WB2APIConfig, WB2APIModel, WB2APIModelCatalog, WB2APIPoolAccounts, WB2APIPoolSummary, WB2APIStats, GatewayConfig, GatewayStatus, GatewayUpdateCheck, GatewayUpdateResult, WbVariant } from "./types";
 
 /** 网关管理服务地址(与 server 默认端口一致)。 */
@@ -12,23 +15,17 @@ function isWebui(): boolean {
   return typeof window !== "undefined" && !("__TAURI_INTERNALS__" in window);
 }
 
-
-function guardWB2API(): void {
-  if (demoModeEnabled) throw new Error(DEMO_UNAVAILABLE_MESSAGE);
-  if (!isWebui()) throw new Error("网关管理仅在 webui 模式可用");
-}
-
-/** webui 且非演示模式时,网关区块可用。 */
+/** 网关管理在 webui / 桌面 App / demo 均可用;写操作在 demo 下抛「演示模式下不可操作」。 */
 export function wb2apiAvailable(): boolean {
-  return isWebui() && !demoModeEnabled;
+  return true;
 }
 
+/** webui 通道:直连本地 server 的 /api/wb2api/* 路由。 */
 async function wb2apiFetch<T>(
   method: "GET" | "POST",
   path: string,
   body?: unknown,
 ): Promise<T> {
-  guardWB2API();
   let res: Response;
   try {
     res = await fetch(`${API_BASE}${path}`, {
@@ -50,63 +47,97 @@ async function wb2apiFetch<T>(
   return data;
 }
 
-/** 网关管理 API(见 server api.rs 的 /api/wb2api/* 段)。 */
+/** 双通道:demo 走虚构数据,桌面走 Tauri invoke,webui 走本地 HTTP。 */
+async function call<T>(
+  invokeName: string,
+  http: { method: "GET" | "POST"; path: string; body?: unknown },
+  invokeArgs?: Record<string, unknown>,
+): Promise<T> {
+  if (demoModeEnabled) return gatewayDemoResponse(invokeName, invokeArgs) as T;
+  if (!isWebui()) return invoke<T>(invokeName, invokeArgs);
+  return wb2apiFetch<T>(http.method, http.path, http.body);
+}
+
+/** 网关管理 API(桌面命令见 src-tauri/src/gateway.rs;webui 路由见 server api.rs)。 */
 export const wb2api = {
   status: () =>
-    wb2apiFetch<WB2APIPoolSummary>("GET", "/api/wb2api/status"),
+    call<WB2APIPoolSummary>("wb2api_status", { method: "GET", path: "/api/wb2api/status" }),
   models: () =>
-    wb2apiFetch<{ object: string; data: WB2APIModel[] }>("GET", "/api/wb2api/models"),
+    call<{ object: string; data: WB2APIModel[] }>("wb2api_models", { method: "GET", path: "/api/wb2api/models" }),
   /** 模型中心:直连腾讯拉真实可用模型(失败回退上游);realm 缺省 cn。 */
   modelCatalog: (realm?: WbVariant) =>
-    wb2apiFetch<WB2APIModelCatalog>(
-      "GET",
-      `/api/wb2api/model-catalog${realm === "ai" ? "?realm=global" : ""}`,
+    call<WB2APIModelCatalog>(
+      "wb2api_model_catalog",
+      { method: "GET", path: `/api/wb2api/model-catalog${realm === "ai" ? "?realm=global" : ""}` },
+      { realm: realm === "ai" ? "global" : "cn" },
     ),
   stats: () =>
-    wb2apiFetch<WB2APIStats>("GET", "/api/wb2api/stats"),
+    call<WB2APIStats>("wb2api_stats", { method: "GET", path: "/api/wb2api/stats" }),
   poolAccounts: () =>
-    wb2apiFetch<WB2APIPoolAccounts>("GET", "/api/wb2api/pool-accounts"),
+    call<WB2APIPoolAccounts>("wb2api_pool_accounts", { method: "GET", path: "/api/wb2api/pool-accounts" }),
   accountOp: (uid: string, op: "disable" | "enable" | "revive", reason?: string) =>
-    wb2apiFetch<WB2APIAdminState>(
-      "POST",
-      `/api/wb2api/accounts/${encodeURIComponent(uid)}/${op}`,
-      reason ? { reason } : {},
+    call<WB2APIAdminState>(
+      "wb2api_account_op",
+      {
+        method: "POST",
+        path: `/api/wb2api/accounts/${encodeURIComponent(uid)}/${op}`,
+        body: reason ? { reason } : {},
+      },
+      { uid, op, reason },
     ),
   onboard: (accountId: string) =>
-    wb2apiFetch<{ ok: boolean; uid: string; file: string }>("POST", "/api/wb2api/onboard", {
-      accountId,
-    }),
+    call<{ ok: boolean; uid: string; file: string }>(
+      "wb2api_onboard",
+      { method: "POST", path: "/api/wb2api/onboard", body: { accountId } },
+      { accountId },
+    ),
   offboard: (uid: string) =>
-    wb2apiFetch<{ ok: boolean; uid: string }>("POST", "/api/wb2api/offboard", { uid }),
+    call<{ ok: boolean; uid: string }>(
+      "wb2api_offboard",
+      { method: "POST", path: "/api/wb2api/offboard", body: { uid } },
+      { uid },
+    ),
   getConfig: () =>
-    wb2apiFetch<WB2APIConfig>("GET", "/api/wb2api/config"),
+    call<WB2APIConfig>("wb2api_get_config", { method: "GET", path: "/api/wb2api/config" }),
   // 网关托管
-  gatewayStatus: () => wb2apiFetch<GatewayStatus>("GET", "/api/wb2api/gateway"),
-  gatewayStart: () => wb2apiFetch<{ ok: boolean; running: boolean }>("POST", "/api/wb2api/gateway/start", {}),
-  gatewayStop: () => wb2apiFetch<{ ok: boolean; running: boolean }>("POST", "/api/wb2api/gateway/stop", {}),
+  gatewayStatus: () => call<GatewayStatus>("gateway_status", { method: "GET", path: "/api/wb2api/gateway" }),
+  gatewayStart: () =>
+    call<{ ok: boolean; running: boolean }>("gateway_start", { method: "POST", path: "/api/wb2api/gateway/start", body: {} }),
+  gatewayStop: () =>
+    call<{ ok: boolean; running: boolean }>("gateway_stop", { method: "POST", path: "/api/wb2api/gateway/stop", body: {} }),
   gatewaySaveConfig: (config: Partial<GatewayConfig>) =>
-    wb2apiFetch<GatewayConfig>("POST", "/api/wb2api/gateway/config", { config }),
+    call<GatewayConfig>(
+      "gateway_save_config",
+      { method: "POST", path: "/api/wb2api/gateway/config", body: { config } },
+      { config },
+    ),
   /** 账号单向推送:立即把账号库导出到网关 auths。 */
   gatewaySyncNow: () =>
-    wb2apiFetch<{ exported: number; removed: number; accounts: number; error?: string }>(
-      "POST",
-      "/api/wb2api/sync/now",
-      {},
+    call<{ exported: number; removed: number; accounts: number; error?: string }>(
+      "gateway_sync_now",
+      { method: "POST", path: "/api/wb2api/sync/now", body: {} },
     ),
   /** 自动挑选空闲端口(从 7863 起随机探测)。 */
-  gatewayPickPort: () => wb2apiFetch<{ port: number }>("POST", "/api/wb2api/gateway/pick-port", {}),
+  gatewayPickPort: () =>
+    call<{ port: number }>("gateway_pick_port", { method: "POST", path: "/api/wb2api/gateway/pick-port", body: {} }),
   /** 探测某端口是否可绑定(服务端口可用性指示)。 */
   gatewayPortCheck: (port: number) =>
-    wb2apiFetch<{ port: number; available: boolean }>(
-      "GET",
-      `/api/wb2api/gateway/port-check?port=${encodeURIComponent(port)}`,
+    call<{ port: number; available: boolean }>(
+      "gateway_port_check",
+      { method: "GET", path: `/api/wb2api/gateway/port-check?port=${encodeURIComponent(port)}` },
+      { port },
     ),
   /** 网关独立升级:检查更新源。 */
   gatewayCheckUpdate: () =>
-    wb2apiFetch<GatewayUpdateCheck>("GET", "/api/wb2api/gateway/update/check"),
+    call<GatewayUpdateCheck>("gateway_check_update", { method: "GET", path: "/api/wb2api/gateway/update/check" }),
   /** 网关独立升级:下载并替换二进制(可选 sha256),网关在跑则重启。 */
   gatewayApplyUpdate: (sha256?: string) =>
-    wb2apiFetch<GatewayUpdateResult>("POST", "/api/wb2api/gateway/update", { sha256 }),
+    call<GatewayUpdateResult>(
+      "gateway_apply_update",
+      { method: "POST", path: "/api/wb2api/gateway/update", body: { sha256 } },
+      { sha256 },
+    ),
   /** 生成一个网关访问密钥(wbs- 前缀)。 */
-  gatewayGenKey: () => wb2apiFetch<{ api_key: string }>("POST", "/api/wb2api/gateway/gen-key", {}),
+  gatewayGenKey: () =>
+    call<{ api_key: string }>("gateway_gen_key", { method: "POST", path: "/api/wb2api/gateway/gen-key", body: {} }),
 };

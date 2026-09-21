@@ -30,6 +30,7 @@ tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
 tauri-plugin-updater = "2"
 wb-switch-core = { path = "../crates/wb-switch-core" }
+wb-switch-gateway = { path = "../crates/wb-switch-gateway" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }

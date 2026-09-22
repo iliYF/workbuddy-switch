@@ -92,6 +92,8 @@ patch_web() {
     'api.isDesktop() && typeof navigator !== "undefined" && navigator.userAgent.includes("Macintosh")' \
     'false'
   replace src/App.tsx "WorkBuddy Switch" "$PRODUCT_NAME"
+  # 侧栏底部运行状态旁的名称(裸 "WorkBuddy" 文本节点),先替换完顶部品牌再处理,避免拆坏 "WorkBuddy Switch"。
+  replace src/App.tsx ">WorkBuddy<" ">$PRODUCT_NAME<"
 }
 
 # ── DESKTOP:Tauri 桌面壳 ──

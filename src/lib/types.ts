@@ -665,6 +665,8 @@ export interface WB2APIModelCatalog {
 /** 网关产物描述:来源基址 + 当前版本 + 平台资产名(发新版或产物改名时改这里)。 */
 export interface GatewayArtifact {
   source_url: string;
+  /** 上游开源 WorkBuddy2API 源仓库(鸣谢作者)。 */
+  upstream_repo?: string;
   /** 当前安装的网关版本(升级成功后由后端写回)。 */
   version: string;
   assets?: Record<string, string>;

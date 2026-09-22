@@ -26,6 +26,7 @@ import { GITHUB_RELEASE_URL, GITHUB_REPOSITORY_URL, openReleaseUrl } from "@/lib
 import { cn } from "@/lib/utils";
 import { UpdateInstallDialog } from "@/components/update-install-dialog";
 import { DemoAction } from "@/components/demo-action";
+import { AboutCard } from "@/components/about-card";
 import { useAccountsStore } from "@/stores/accounts";
 
 interface SettingsGroupProps {
@@ -1144,7 +1145,7 @@ function RateLimitCard() {
 /** 设置页：自动签到配置 / 权限检测 / 更新配置。 */
 export default function SettingsPage() {
   return (
-    <div className="mx-auto min-w-0 w-full max-w-3xl px-4 py-6 sm:px-6 sm:py-8">
+    <div className="mx-auto w-full max-w-[1180px] min-w-0 px-4 py-6 sm:px-8 sm:py-9">
       <header className="mb-10 sm:mb-12">
         <h1 className="text-2xl font-semibold tracking-tight">设置</h1>
         <p className="mt-2 text-sm leading-6 text-muted-foreground">自动签到、限额监听、权限检测与自动更新配置。</p>
@@ -1158,6 +1159,7 @@ export default function SettingsPage() {
         <RateLimitCard />
         {api.isDesktop() || api.isDemoMode() ? <StartupCard /> : null}
         {api.isWebui() && !api.isDemoMode() ? null : <UpdateCard />}
+        <AboutCard />
       </div>
     </div>
   );

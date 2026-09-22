@@ -21,6 +21,7 @@ import {
   Plus,
   QrCode,
   Save,
+  Boxes,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -67,6 +68,12 @@ import { cn } from "@/lib/utils";
 
 /** 托管网关(wb2api)项目主页兜底(fork);网关配置就绪时按钮改用其 source_url。 */
 const GATEWAY_REPO_URL = "https://github.com/iliYF/workbuddy2api";
+
+/** 从 GitHub 仓库地址提取作者(owner);非 github.com 地址返回 null。 */
+function githubOwner(url?: string): string | null {
+  if (!url) return null;
+  return /github\.com\/([^/]+)/.exec(url)?.[1] ?? null;
+}
 
 function StatusBadge({
   state,
@@ -814,7 +821,7 @@ export default function GatewayPage() {
   }, [oauthOpen, reconcileAccounts]);
 
   return (
-    <div className="mx-auto w-full max-w-[1800px] space-y-6 px-5 py-6 sm:px-8 sm:py-8">
+    <div className="mx-auto w-full max-w-[1180px] space-y-6 px-4 py-6 sm:px-8 sm:py-8">
       <header className="mb-6 flex min-w-0 flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <h1 className="text-[28px] font-semibold tracking-tight">网关管理</h1>
@@ -948,7 +955,11 @@ export default function GatewayPage() {
                   })}
                 </div>
               ) : (
-                <p className="text-sm text-muted-foreground">池有账号后模型列表会自动出现,如 cn:hy3-x。</p>
+                <div className="flex flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed bg-muted/20 px-4 py-8 text-center">
+                  <Boxes className="size-5 text-muted-foreground" />
+                  <p className="text-sm text-muted-foreground">账号池暂无可展示的账号</p>
+                  <p className="text-sm text-muted-foreground">无可用的模型供选择</p>
+                </div>
               )}
             </div>
           </div>
@@ -1151,6 +1162,7 @@ export default function GatewayPage() {
         </TabsContent>
 
         <TabsContent value="gateway" className="space-y-6">
+          <div className="grid gap-6 lg:grid-cols-2">
           <Section title="运行状态" description={`账号池状态每 ${pollSeconds} 秒自动刷新`}>
               <div className="mx-4 grid grid-cols-2 gap-2 py-3 sm:mx-5 sm:grid-cols-4">
                 <Stat
@@ -1196,9 +1208,77 @@ export default function GatewayPage() {
                 </div>
               </Row>
 
+              <Row className="flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+                <div className="min-w-0">
+                  <div className="text-[13px]">服务端口</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">开放接口地址随端口变化;可一键生成随机空闲端口({PORT_PICK_BASE}~{PORT_PICK_MAX} 随机探测)</div>
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <span
+                    className={cn(
+                      "size-2 shrink-0 rounded-full",
+                      portUsable === true && "bg-emerald-500",
+                      portUsable === false && "bg-red-500",
+                      portUsable == null && "bg-muted-foreground/40",
+                    )}
+                    title={portUsable === true ? "端口可用" : portUsable === false ? "端口被占用" : "可用性探测中…"}
+                  />
+                  <Input
+                    type="number"
+                    className="h-8 w-24 text-xs"
+                    value={gwForm?.port ?? DEFAULT_GATEWAY_PORT}
+                    onChange={(e) => setGwForm((f) => (f ? { ...f, port: Number(e.target.value) || DEFAULT_GATEWAY_PORT } : f))}
+                  />
+                  <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs" onClick={() => void handleGwPickPort()}>
+                    <Wand2 className="size-3.5" /> 生成
+                  </Button>
+                </div>
+              </Row>
+
+              <Row className="flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+                <div className="min-w-0">
+                  <div className="text-[13px]">API Key</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">用于客户端接入鉴权(wbs- 前缀);可一键生成或复制</div>
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="size-8"
+                    onClick={() => void copyText(gwForm?.api_key ?? "", "API Key")}
+                    disabled={!gwForm?.api_key}
+                    aria-label="复制 API Key"
+                    title="复制 API Key"
+                  >
+                    <Copy className="size-3.5" />
+                  </Button>
+                  <div className="relative">
+                    <Input
+                      value={gwForm?.api_key ?? ""}
+                      onChange={setGwField("api_key")}
+                      type={showApiKey ? "text" : "password"}
+                      placeholder="点击生成"
+                      className="h-8 w-full pr-8 font-mono text-xs sm:w-64"
+                    />
+                    <button
+                      type="button"
+                      className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      onClick={() => setShowApiKey((s) => !s)}
+                      aria-label={showApiKey ? "隐藏" : "显示"}
+                      title={showApiKey ? "隐藏" : "显示"}
+                    >
+                      {showApiKey ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                    </button>
+                  </div>
+                  <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs" onClick={() => void handleGenKey()}>
+                    <Wand2 className="size-3.5" /> 生成
+                  </Button>
+                </div>
+              </Row>
+
           </Section>
 
-          <Section title="基本设置" description="工作模式、服务端口与访问密钥(保存后生效)">
+          <Section title="基本设置" description="工作模式、自动启动与巡检间隔(保存后生效)">
               <Row className="flex-col items-stretch gap-2 sm:flex-row sm:items-center">
                 <div className="min-w-0">
                   <div className="text-[13px]">工作模式</div>
@@ -1292,74 +1372,6 @@ export default function GatewayPage() {
                 </Row>
               )}
 
-              <Row className="flex-col items-stretch gap-2 sm:flex-row sm:items-center">
-                <div className="min-w-0">
-                  <div className="text-[13px]">服务端口</div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">开放接口地址随端口变化;可一键生成随机空闲端口({PORT_PICK_BASE}~{PORT_PICK_MAX} 随机探测)</div>
-                </div>
-                <div className="flex shrink-0 items-center gap-1.5">
-                  <span
-                    className={cn(
-                      "size-2 shrink-0 rounded-full",
-                      portUsable === true && "bg-emerald-500",
-                      portUsable === false && "bg-red-500",
-                      portUsable == null && "bg-muted-foreground/40",
-                    )}
-                    title={portUsable === true ? "端口可用" : portUsable === false ? "端口被占用" : "可用性探测中…"}
-                  />
-                  <Input
-                    type="number"
-                    className="h-8 w-24 text-xs"
-                    value={gwForm?.port ?? DEFAULT_GATEWAY_PORT}
-                    onChange={(e) => setGwForm((f) => (f ? { ...f, port: Number(e.target.value) || DEFAULT_GATEWAY_PORT } : f))}
-                  />
-                  <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs" onClick={() => void handleGwPickPort()}>
-                    <Wand2 className="size-3.5" /> 生成
-                  </Button>
-                </div>
-              </Row>
-
-              <Row className="flex-col items-stretch gap-2 sm:flex-row sm:items-center">
-                <div className="min-w-0">
-                  <div className="text-[13px]">API Key</div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">用于客户端接入鉴权(wbs- 前缀);可一键生成或复制</div>
-                </div>
-                <div className="flex shrink-0 items-center gap-1.5">
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="size-8"
-                    onClick={() => void copyText(gwForm?.api_key ?? "", "API Key")}
-                    disabled={!gwForm?.api_key}
-                    aria-label="复制 API Key"
-                    title="复制 API Key"
-                  >
-                    <Copy className="size-3.5" />
-                  </Button>
-                  <div className="relative">
-                    <Input
-                      value={gwForm?.api_key ?? ""}
-                      onChange={setGwField("api_key")}
-                      type={showApiKey ? "text" : "password"}
-                      placeholder="点击生成"
-                      className="h-8 w-full pr-8 font-mono text-xs sm:w-64"
-                    />
-                    <button
-                      type="button"
-                      className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                      onClick={() => setShowApiKey((s) => !s)}
-                      aria-label={showApiKey ? "隐藏" : "显示"}
-                      title={showApiKey ? "隐藏" : "显示"}
-                    >
-                      {showApiKey ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
-                    </button>
-                  </div>
-                  <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs" onClick={() => void handleGenKey()}>
-                    <Wand2 className="size-3.5" /> 生成
-                  </Button>
-                </div>
-              </Row>
-
               <Row>
                 <div className="min-w-0">
                   <div className="text-[13px]">自动启动网关</div>
@@ -1402,6 +1414,7 @@ export default function GatewayPage() {
                 </Button>
               </Row>
           </Section>
+          </div>
 
           <Section
             title="账号池"
@@ -1506,7 +1519,7 @@ export default function GatewayPage() {
           </Section>
 
           <Section
-            title="网关信息"
+            title="兼容网关"
             headerTitle="网关版本与升级检查"
             headerAction={
               <Button
@@ -1553,6 +1566,27 @@ export default function GatewayPage() {
                 <code className="mt-0.5 block truncate font-mono text-xs text-muted-foreground">
                   {gw?.auth_dir ?? "~/.wb-switch/gateway/wbs_auths"}
                 </code>
+              </div>
+            </Row>
+            <Row className="flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+              <div className="min-w-0">
+                <div className="text-[13px]">致谢</div>
+                <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
+                  {(() => {
+                    const up = gw?.config?.artifact?.upstream_repo;
+                    const upOwner = githubOwner(up) ?? "作者";
+                    const src = gw?.config?.artifact?.source_url?.replace(/\/releases\/?$/, "");
+                    const srcOwner = githubOwner(src) ?? "作者";
+                    return (
+                      <>
+                        <a href={`https://github.com/${upOwner}`} target="_blank" rel="noopener noreferrer" className="rounded bg-blue-500/15 px-1 font-semibold text-blue-700 hover:bg-blue-500/25 dark:text-blue-400">@{upOwner}</a> 开源项目{" "}
+                        「<a href={up} target="_blank" rel="noopener noreferrer" className="rounded bg-blue-500/15 px-1 font-semibold text-blue-700 hover:bg-blue-500/25 dark:text-blue-400">WorkBuddy2API</a>」，更新源由{" "}
+                        <a href={`https://github.com/${srcOwner}`} target="_blank" rel="noopener noreferrer" className="font-semibold text-foreground hover:opacity-80">@{srcOwner}</a> 提供的{" "}
+                        「<a href={src} target="_blank" rel="noopener noreferrer" className="font-semibold text-foreground hover:opacity-80">WorkBuddy2API</a>」 获取。
+                      </>
+                    );
+                  })()}
+                </p>
               </div>
             </Row>
           </Section>

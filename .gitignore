@@ -45,3 +45,6 @@ npm/platform/*/bin/
 .codex/
 .grok/
 /.workbuddy/
+launch.json
+
+*.dmg

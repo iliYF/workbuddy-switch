@@ -16,6 +16,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use rust_embed::RustEmbed;
 use serde_json::{json, Value};
+use tower_http::cors::CorsLayer;
 
 use wb_switch_core::modules::{
     account, auth_file, checkin, codebuddy_cli, codebuddy_cn_ide, codebuddy_ide, config,
@@ -58,7 +59,7 @@ static SWITCH_PROGRESS: Mutex<Option<String>> = Mutex::new(None);
 static SWITCH_RUNNING: Mutex<bool> = Mutex::new(false);
 
 pub fn router() -> Router {
-    Router::new()
+    let app = Router::new()
         .route("/api/status", get(api_status))
         .route("/api/accounts", get(api_accounts))
         .route("/api/codebuddy-cli/status", get(api_codebuddy_cli_status))
@@ -146,7 +147,11 @@ pub fn router() -> Router {
         // workbuddy-hub 网关对接(workbuddy2api 管理面,additive 路由段)
         .merge(crate::wb2api::router())
 
-        .fallback(static_handler)
+        .fallback(static_handler);
+    // CORS 仅本地开发调试(vite 1420 跨域)需要:debug 构建自动启用,release 不带(与 main.rs 同款开发态区分)。
+    #[cfg(debug_assertions)]
+    let app = app.layer(CorsLayer::permissive());
+    app
 }
 
 fn json_ok(v: Value) -> Response {

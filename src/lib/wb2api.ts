@@ -6,7 +6,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { demoModeEnabled } from "./demo-mode";
 import { gatewayDemoResponse } from "./gateway-demo";
-import { API_BASE } from "./server-base";
+import { API_BASE } from "./api";
 import type { WB2APIAdminState, WB2APIConfig, WB2APIModel, WB2APIModelCatalog, WB2APIPoolAccounts, WB2APIPoolSummary, WB2APIStats, GatewayConfig, GatewayStatus, GatewayUpdateCheck, GatewayUpdateResult, WbVariant } from "./types";
 
 /** 网关默认监听端口(与后端 DEFAULT_GATEWAY_PORT 同口径)。 */

@@ -1,6 +1,6 @@
 [package]
 name = "wb-switch-gateway"
-version = "0.1.40"
+version = "0.0.1"
 edition = "2021"
 description = "wb-switch 网关管理(对接 workbuddy2api:托管/同步/模型中心/配置),独立 crate,不依赖 Tauri"
 

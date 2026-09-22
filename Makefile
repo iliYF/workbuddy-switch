@@ -1,14 +1,16 @@
-# 开发用 Makefile:编译 wb2api(上游 Go 网关)并集成到本机,再编译当前项目。
+# 开发用 Makefile:存在上游 Go 网关源码时编译并集成 wb2api,再编译当前项目。
 #
-#   make wb2api          编译 ../workbuddy2api 的 Go 网关,产物在源码目录(wb2api)
-#   make wb2api-install  把产物复制到 ~/.wb-switch/gateway/bin/(switch 托管目录)
-#   make gateway         = wb2api + wb2api-install
+#   make gateway         编译并集成 wb2api(仅当上游源码 ../workbuddy2api 存在时可用)
 #   make rust            cargo build --workspace(编译 Rust 服务端)
 #   make web             npm run build(编译前端)
-#   make build           默认目标 = gateway + rust + web
+#   make build           默认目标 = gateway(如可用)+ rust + web
+#   make dev             启动 Web UI 开发服务器(浏览器预览,HMR)
+#   make demo            启动 Web UI 开发服务器(演示模式:只读 + 演示数据)
+#   make app             编译桌面 App(先 apply-patch 再 tauri build Release + fix-app)
 #
 # 环境变量:
 #   GATEWAY_BIN  网关托管目录,缺省 ~/.wb-switch/gateway/bin
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  桌面 App 签名密钥密码(make app 必需)
 
 SHELL := /bin/sh
 
@@ -24,11 +26,16 @@ else
   BIN := wb2api
 endif
 
-.PHONY: wb2api wb2api-install gateway rust web build
+# 仅在存在上游网关源码时启用网关编译目标;缺失时 make build 跳过网关。
+HAVE_GATEWAY_SRC := $(wildcard $(WB2API_SRC)/cmd/server)
+GATEWAY_TARGET := $(if $(HAVE_GATEWAY_SRC),gateway)
+
+.PHONY: rust web build dev demo app
+ifneq ($(HAVE_GATEWAY_SRC),)
+.PHONY: wb2api wb2api-install gateway
 
 ## 编译 wb2api(Go,纯静态链接,与 workbuddy2api/dev.sh 同源)。
 wb2api:
-	@test -d "$(WB2API_SRC)/cmd/server" || { echo "未找到 wb2api 源码: $(WB2API_SRC)" >&2; exit 1; }
 	cd "$(WB2API_SRC)" && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "$(BIN)" ./cmd/server
 	@ls -lh "$(WB2API_SRC)/$(BIN)"
 
@@ -40,6 +47,7 @@ wb2api-install: wb2api
 
 ## 编译并集成 wb2api。
 gateway: wb2api-install
+endif
 
 ## 编译当前项目(Rust 服务端)。
 rust:
@@ -49,5 +57,21 @@ rust:
 web:
 	npm run build
 
-## 编译并集成 wb2api,再编译当前项目(默认目标)。
-build: gateway rust web
+## 网关(如可用)再编译当前项目(默认目标)。
+build: $(GATEWAY_TARGET) rust web
+
+## 启动本地后端 + Web UI 开发服务器(一键开发,后端 57890,vite HMR;Ctrl+C 一起退出)。
+## 前端在浏览器里 hasUnifiedTitleBar=false,顶部标题不显示(看标题需 make app)。
+dev:
+	@bash scripts/dev-web.sh
+
+## 启动 Web UI 开发服务器(演示模式:只读前端 + 演示数据)。
+demo:
+	npm run dev:demo
+
+## 编译桌面 App(先 apply-patch 应用 fork 身份/产品名,再 tauri build Release + fix-app)。
+## 产物在 target/release/bundle/macos/WorkBuddy Switch.app;需先 export TAURI_SIGNING_PRIVATE_KEY_PASSWORD。
+app:
+	@bash scripts/apply-patch.sh
+	@test -n "$$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" || { echo "错误: 请先 export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=…" >&2; exit 1; }
+	npm run build:app:release

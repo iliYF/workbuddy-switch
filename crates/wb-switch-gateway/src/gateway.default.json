@@ -1,0 +1,26 @@
+{
+  "enabled": false,
+  "bin_path": "",
+  "api_key": "",
+  "mode": "balance",
+  "pinned_uid": null,
+  "rotation_uid": null,
+  "auto_start": false,
+  "artifact": {
+    "source_url": "https://github.com/iliYF/workbuddy2api",
+    "upstream_repo": "https://github.com/Sliverkiss/workbuddy2api",
+    "version": "",
+    "assets": {
+      "darwin-arm64": "wb2api-darwin-arm64",
+      "darwin-amd64": "wb2api-darwin-amd64",
+      "windows-amd64": "wb2api-windows-amd64.exe",
+      "linux-amd64": "wb2api-linux-amd64",
+      "linux-arm64": "wb2api-linux-arm64"
+    }
+  },
+  "sync_enabled": false,
+  "pool_uids": [],
+  "no_sync_uids": [],
+  "sync_interval_seconds": 30,
+  "webui_poll_seconds": 5
+}

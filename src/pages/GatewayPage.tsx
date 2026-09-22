@@ -17,7 +17,7 @@ import {
   EyeOff,
   RotateCw,
   Download,
-  GitBranch,
+  ExternalLink,
   Plus,
   QrCode,
   Save,
@@ -65,8 +65,8 @@ import type {
 import { useAccountsStore } from "@/stores/accounts";
 import { cn } from "@/lib/utils";
 
-/** 托管网关(wb2api)上游项目主页。 */
-const GATEWAY_REPO_URL = "https://github.com/Sliverkiss/workbuddy2api";
+/** 托管网关(wb2api)项目主页兜底(fork);网关配置就绪时按钮改用其 source_url。 */
+const GATEWAY_REPO_URL = "https://github.com/iliYF/workbuddy2api";
 
 function StatusBadge({
   state,
@@ -98,6 +98,47 @@ function poolExpiryLabel(credit?: CreditExpiry): string {
 function formatCredits(v: number | null | undefined): string {
   if (v == null) return "—";
   return v.toFixed(1);
+}
+
+/** 网关版本 `v<YYYYMMDDHHMM>-<revision>` 解析;不匹配返回 null(用原始值展示)。 */
+function parseGatewayVersion(version: string | null | undefined): { time: string; revision: string } | null {
+  if (!version) return null;
+  const m = version.trim().match(/^v?(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})-([0-9a-fA-F]+)$/);
+  if (!m) return null;
+  const [, y, mo, d, h, mi, revision] = m;
+  return { time: `${y}-${mo}-${d} ${h}:${mi}`, revision };
+}
+
+/** 「运行版本」:时间在标签右边(黑色),revision 标签在下方,运行状态色与服务状态一致。 */
+function RunningVersion({ version, bin, running }: { version?: string | null; bin?: string | null; running?: boolean }) {
+  const ver = parseGatewayVersion(version);
+  const hasBin = Boolean(bin);
+  return (
+    <div className="min-w-0">
+      <div className="flex min-w-0 items-center gap-1.5">
+        <span className="text-[13px]">运行版本</span>
+        {ver && <span className="min-w-0 truncate text-[13px] text-foreground">{ver.time}</span>}
+      </div>
+      <div className={cn("mt-0.5 flex min-w-0 items-center gap-1.5 text-xs", !hasBin ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground")}>
+        {!hasBin ? (
+          "未安装网关"
+        ) : ver ? (
+          <span className="inline-flex shrink-0 items-center rounded-md bg-cyan-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-cyan-700 dark:text-cyan-300">
+            {ver.revision}
+          </span>
+        ) : version ? (
+          `版本 ${version}`
+        ) : (
+          bin?.split("/").pop()
+        )}
+        {hasBin && (
+          <span className={running ? "text-emerald-600 dark:text-emerald-400" : undefined}>
+            {running ? "运行中" : "未运行"}
+          </span>
+        )}
+      </div>
+    </div>
+  );
 }
 
 /** 小节:卡片外的小标题 + Card(描述/标题放在卡片内部标题栏,与 Token 统计页一致;
@@ -670,7 +711,12 @@ export default function GatewayPage() {
   const connApiKey = config?.apiKey || form?.apiKey || "";
   const connBaseUrlV1 = `${connBaseUrl || `http://127.0.0.1:${DEFAULT_GATEWAY_PORT}`}/v1`;
   const maskedKey = connApiKey ? `${connApiKey.slice(0, 4)}••••${connApiKey.slice(-4)}` : "(未配置,填写 apiKey 后生效)";
-  const sampleModels = models.slice(0, 8).map((m) => m.id);
+  // 接入弹窗的模型列表:按倍率从小到大排。
+  const creditOf = (m: WB2APIModel) => {
+    const n = Number.parseFloat((m.credits ?? "").replace(/[^0-9.]/g, ""));
+    return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY;
+  };
+  const sortedModels = useMemo(() => [...models].sort((a, b) => creditOf(a) - creditOf(b)), [models]);
 
   // 首次安装弹窗:目标平台资产名(与后端 platform_asset 同口径)。
   const ua = navigator.userAgent.toLowerCase();
@@ -789,82 +835,122 @@ export default function GatewayPage() {
       <Dialog open={connOpen} onOpenChange={setConnOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>接入配置 · WorkBuddy Provider</DialogTitle>
+            <DialogTitle>WorkBuddy Provider</DialogTitle>
             <DialogDescription>
-              把本反代作为 Provider 配到客户端(cc-switch / Codex / OpenAI 兼容工具)所需的关键信息。
+              在 CC Switch 中新建 Provider,按下方信息填写即可。
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="grid gap-3 sm:grid-cols-2">
-            <div className="space-y-1.5">
-              <Label>Base URL(OpenAI 兼容)</Label>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 truncate rounded-md border bg-muted/40 px-2 py-1.5 font-mono text-xs">
-                  {connBaseUrlV1}
-                </code>
-                <Button size="sm" variant="outline" onClick={() => void copyText(connBaseUrlV1, "Base URL")}>
-                  复制
-                </Button>
+            <div className="space-y-3 rounded-lg border bg-card p-3 shadow-none">
+              <div className="space-y-1.5">
+                <Label>Base URL(OpenAI 兼容)</Label>
+                <div className="flex items-center gap-2">
+                  <code
+                    className="truncate rounded-md border bg-muted/40 px-2 py-1.5 font-mono text-xs"
+                    style={{ width: 231 }}
+                  >
+                    {connBaseUrlV1}
+                  </code>
+                  <Button
+                    size="icon"
+                    variant="outline"
+                    className="size-8 shrink-0"
+                    onClick={() => void copyText(connBaseUrlV1, "Base URL")}
+                    aria-label="复制 Base URL"
+                    title="复制 Base URL"
+                  >
+                    <Copy className="size-4" />
+                  </Button>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>API Key</Label>
+                <div className="flex items-center gap-2">
+                  <div className="relative">
+                    <code
+                      className="block truncate rounded-md border bg-muted/40 py-1.5 pl-2 pr-8 font-mono text-xs"
+                      style={{ width: 231 }}
+                    >
+                      {showKey ? connApiKey || "(未配置)" : maskedKey}
+                    </code>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="absolute right-0 top-0 h-full w-8 text-muted-foreground hover:text-foreground"
+                      onClick={() => setShowKey((s) => !s)}
+                      aria-label={showKey ? "隐藏 API Key" : "显示 API Key"}
+                      title={showKey ? "隐藏" : "显示"}
+                    >
+                      {showKey ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                    </Button>
+                  </div>
+                  <Button
+                    size="icon"
+                    variant="outline"
+                    className="size-8 shrink-0"
+                    onClick={() => void copyText(connApiKey, "API Key")}
+                    disabled={!connApiKey}
+                    aria-label="复制 API Key"
+                    title="复制 API Key"
+                  >
+                    <Copy className="size-4" />
+                  </Button>
+                </div>
               </div>
             </div>
+
             <div className="space-y-1.5">
-              <Label>API Key</Label>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 truncate rounded-md border bg-muted/40 px-2 py-1.5 font-mono text-xs">
-                  {showKey ? connApiKey || "(未配置)" : maskedKey}
-                </code>
-                <Button size="sm" variant="outline" onClick={() => setShowKey((s) => !s)}>
-                  {showKey ? "隐藏" : "显示"}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => void copyText(connApiKey, "API Key")}
-                  disabled={!connApiKey}
-                >
-                  复制
-                </Button>
-              </div>
+              <Label>可用模型</Label>
+              {sortedModels.length > 0 ? (
+                <div className="max-h-72 space-y-1 overflow-y-auto rounded-md border bg-muted/20 p-1.5">
+                  {sortedModels.map((m) => {
+                    const bare = bareModelId(m.id);
+                    const isGlobal = m.id.toLowerCase().startsWith("global:");
+                    const isAuto = bareModelId(m.id).toLowerCase().startsWith("auto");
+                    return (
+                      <div key={m.id} className="flex items-start gap-2 rounded-lg border bg-card px-2.5 py-2 text-sm shadow-none">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="font-medium">{m.name || bare}</span>
+                            <Badge variant={isGlobal ? "outline" : "secondary"} className="h-4 px-1.5 text-[10px]">
+                              {isGlobal ? "国际版" : "国内版"}
+                            </Badge>
+                          </div>
+                          <div className="mt-1 flex items-center gap-1">
+                            <code className="truncate font-mono text-xs text-muted-foreground">{bare}</code>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="size-6 shrink-0"
+                              onClick={() => void copyText(m.id, "模型名")}
+                              aria-label={`复制 ${m.id}`}
+                              title="复制模型名"
+                            >
+                              <Copy className="size-3.5" />
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap justify-end gap-1.5" style={{ maxWidth: "55%" }}>
+                          <Badge variant="secondary">
+                            {(m.context_length ?? 0) >= 1024 ? `${Math.round((m.context_length ?? 0) / 1024)}K` : m.context_length ?? "—"}
+                          </Badge>
+                          {m.credits ? <Badge variant="outline">倍率 {m.credits}</Badge> : null}
+                          {m.supports_images ? <Badge variant="outline">多模态</Badge> : null}
+                          {m.reasoning_effort || m.reasoning_summary ? (
+                            <Badge variant="outline">{m.reasoning_effort || m.reasoning_summary}</Badge>
+                          ) : null}
+                          {m.supports_reasoning ? <Badge variant="outline">推理</Badge> : null}
+                          {isAuto ? <Badge variant="outline">Auto</Badge> : null}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">池有账号后模型列表会自动出现,如 cn:hy3-x。</p>
+              )}
             </div>
-          </div>
-
-          <div className="space-y-1">
-            <Label>模型(带 cn:/global: 前缀)</Label>
-            {sampleModels.length > 0 ? (
-              <div className="flex flex-wrap gap-1.5">
-                {sampleModels.map((id) => (
-                  <Badge key={id} variant="secondary">
-                    {id}
-                  </Badge>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">池有账号后模型列表会自动出现,如 cn:hy3-x。</p>
-            )}
-          </div>
-
-          <Separator />
-
-          <div className="space-y-2 text-sm">
-            <div className="font-medium">在 cc-switch 中添加 WorkBuddy Provider:</div>
-            <ol className="list-inside list-decimal space-y-1 text-muted-foreground">
-              <li>打开 cc-switch,新建 Provider(类型按客户端选:Claude Code 走 Anthropic / Codex、Cherry Studio 等走 OpenAI)</li>
-              <li>
-                Base URL:OpenAI 兼容客户端填 <code>{connBaseUrlV1}</code>;Anthropic 客户端(Claude Code)填{" "}
-                <code>{connBaseUrl || `http://127.0.0.1:${DEFAULT_GATEWAY_PORT}`}</code>(不带 /v1)
-              </li>
-              <li>API Key 填上方密钥(直连 wb2api 用 apiKey;若走 manager 网关用其签发的 wbk_ 密钥)</li>
-              <li>模型填上方列表中的带前缀模型名(如 cn:hy3-x),可自定义)</li>
-            </ol>
-          </div>
-
-          <Alert>
-            <Server className="size-4" />
-            <AlertDescription>
-              直连 wb2api 用上方信息(base={connBaseUrlV1})。若要用 manager 网关(带密钥分发/配额/模型白名单),改填{" "}
-              <code>http://127.0.0.1:7864/v1</code> + manager 签发的 <code>wbk_…</code> 密钥。
-            </AlertDescription>
-          </Alert>
           </div>
         </DialogContent>
       </Dialog>
@@ -1427,26 +1513,22 @@ export default function GatewayPage() {
                 variant="ghost"
                 size="icon"
                 className="size-7"
-                onClick={() => window.open(GATEWAY_REPO_URL, "_blank", "noopener,noreferrer")}
+                onClick={() =>
+                  window.open(
+                    gw?.config?.artifact?.source_url?.replace(/\/releases\/?$/, "") ?? GATEWAY_REPO_URL,
+                    "_blank",
+                    "noopener,noreferrer",
+                  )
+                }
                 aria-label="打开项目主页"
                 title="打开项目主页"
               >
-                <GitBranch className="size-4" />
+                <ExternalLink className="size-4" />
               </Button>
             }
           >
             <Row>
-              <div className="min-w-0">
-                <div className="text-[13px]">运行版本</div>
-                <div className={cn("mt-0.5 truncate text-xs", !gw?.bin ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground")}>
-                  {!gw?.bin
-                    ? "未安装网关"
-                    : gw?.version
-                      ? `版本 ${gw.version}`
-                      : gw.bin.split("/").pop()}
-                  {gw?.bin && (gw?.running ? " · 运行中" : " · 未运行")}
-                </div>
-              </div>
+              <RunningVersion version={gw?.version} bin={gw?.bin} running={gw?.running} />
               <div className="flex shrink-0 items-center gap-1.5">
                 {gw?.bin ? (
                   <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => void handleGwUpgrade()} disabled={gwUpdating !== null}>

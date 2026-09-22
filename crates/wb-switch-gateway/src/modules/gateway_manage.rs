@@ -42,41 +42,19 @@ fn gateway_state_file() -> PathBuf {
     gateway_root().join(format!("{GATEWAY_PREFIX}data")).join("state.json")
 }
 
+/// 默认网关配置:从同 crate 的 gateway.default.json 加载(端口/api_key 由代码生成,保持单一来源)。
+const DEFAULT_GW_CFG_STR: &str = include_str!("../gateway.default.json");
+
 pub fn default_gateway_config() -> Value {
-    json!({
-        "enabled": false,
-        "bin_path": "",
-        "port": DEFAULT_GATEWAY_PORT,
-        // 访问密钥默认自动生成一个(网关必须鉴权,不允许留空)。
-        "api_key": generate_api_key(),
-        "mode": "balance",
-        "pinned_uid": null,
-        // 积分轮转模式下的当前活跃账号(由 hub 巡检轮转维护)。
-        "rotation_uid": null,
-        "auto_start": false,
-        // 网关产物:来源基址 / 当前版本 / 平台资产名(发新版或产物改名时改这里)。
-        "artifact": {
-            "source_url": "https://github.com/iliYF/workbuddy2api/releases",
-            "version": "",
-            "assets": {
-                "darwin-arm64": "wb2api-darwin-arm64",
-                "darwin-amd64": "wb2api-darwin-amd64",
-                "windows-amd64": "wb2api-windows-amd64.exe",
-                "linux-amd64": "wb2api-linux-amd64",
-                "linux-arm64": "wb2api-linux-arm64",
-            },
-        },
-        // 自动入池:开启后本地账号库的账号自动进入网关池(仍需不在 no_sync_uids)。
-        "sync_enabled": false,
-        // 手动入池:显式勾选要入池的账号(自动入池关闭时是唯一来源)。
-        "pool_uids": [],
-        // 永不入池:无论自动/手动都不导出(如主账号,避免风控)。
-        "no_sync_uids": [],
-        // 自动入池巡检间隔(秒):开启自动入池后按此间隔同步账号库;未开启不巡检。
-        "sync_interval_seconds": 30,
-        // webui 池状态刷新间隔(秒):前端页面轮询池账号/汇总的间隔;最小 5s,最大 3600s。
-        "webui_poll_seconds": 5,
-    })
+    let mut cfg: Value =
+        serde_json::from_str(DEFAULT_GW_CFG_STR).expect("嵌入的 gateway.default.json 解析失败");
+    // 端口单一来源 DEFAULT_GATEWAY_PORT(文件不写,避免两处)。
+    cfg["port"] = json!(DEFAULT_GATEWAY_PORT);
+    // 网关必须鉴权:api_key 留空则由代码生成一个稳定的。
+    if cfg["api_key"].as_str().map(str::is_empty).unwrap_or(true) {
+        cfg["api_key"] = json!(generate_api_key());
+    }
+    cfg
 }
 
 /// 生成访问密钥:`wbs-` 前缀 + 32 位十六进制随机。
@@ -522,6 +500,7 @@ fn cfg_source_url() -> String {
         .and_then(Value::as_str)
         .unwrap_or("")
         .trim()
+        .trim_end_matches("/releases")
         .to_string()
 }
 
@@ -561,10 +540,10 @@ fn platform_asset() -> String {
         .to_string()
 }
 
-/// 从 `{source_url}.atom` 取最新 release tag(第一个 `<entry>` 的 `<title>`)。
+/// 从 `{source_url}/releases.atom` 取最新 release tag(第一个 `<entry>` 的 `<title>`)。
 /// GitHub 原生 feed,无需 API 鉴权/限流;无 stable 时也能给出最新 canary tag。
 async fn fetch_latest_tag(src: &str) -> Option<String> {
-    let url = format!("{}.atom", src.trim_end_matches('/'));
+    let url = format!("{}/releases.atom", src.trim_end_matches('/'));
     let (status, _, body) = http_request_raw(&url, "GET", None, None, None, true).await;
     if status != 200 {
         return None;
@@ -618,7 +597,7 @@ pub async fn check_gateway_update() -> Value {
 }
 
 /// 下载并原子替换网关二进制;可选 sha256 校验;网关在跑则用新二进制重启。
-/// 目标版本取 releases.atom 最新 tag,下载 `{source_url}/download/{tag}/{asset}`;
+/// 目标版本取 releases.atom 最新 tag,下载 `{source_url}/releases/download/{tag}/{asset}`;
 /// 成功后把 artifact.version 写回为该 tag(与 /healthz 一致)。
 pub async fn apply_gateway_update(sha256: Option<&str>) -> Result<Value, String> {
     let src = cfg_source_url();
@@ -637,7 +616,7 @@ pub async fn apply_gateway_update(sha256: Option<&str>) -> Result<Value, String>
             "bin": bin_path.to_string_lossy(),
         }));
     }
-    let url = format!("{}/download/{tag}/{}", src.trim_end_matches('/'), platform_asset());
+    let url = format!("{}/releases/download/{tag}/{}", src.trim_end_matches('/'), platform_asset());
     let resp = reqwest::get(&url).await.map_err(|e| format!("下载失败: {e}"))?;
     if !resp.status().is_success() {
         return Err(format!("下载失败: HTTP {}", resp.status()));

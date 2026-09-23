@@ -1457,7 +1457,7 @@ export default function CreditStatsPage() {
     viewVariant !== "all" && variantAccountIds !== null && variantAccountIds.size === 0;
 
   return (
-    <div className="mx-auto w-full max-w-[1180px] min-w-0 px-4 py-6 sm:px-8 sm:py-9">
+    <div className="mx-auto w-full min-w-0 max-w-[min(1600px,max(500px,calc(100%-3rem)))] px-4 py-6 sm:px-8 sm:py-9">
       <header className="mb-10 flex min-w-0 flex-wrap items-start justify-between gap-4 sm:mb-12">
         <div className="min-w-0">
           <h1 className="text-[28px] font-semibold tracking-tight">积分统计</h1>
@@ -1522,7 +1522,7 @@ export default function CreditStatsPage() {
           正在采集账号积分并加载统计…
         </div>
       ) : stats && filteredStats ? (
-        <div className="min-w-0 space-y-12">
+        <div className="min-w-0 space-y-6">
           {viewVariant === "all" && accounts.length === 0 && (
             <Alert>
               <CircleAlert />

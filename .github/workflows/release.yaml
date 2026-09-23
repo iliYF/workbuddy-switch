@@ -6,123 +6,63 @@ on:
   workflow_dispatch:
     inputs:
       platform:
-        description: "选择要构建的平台。mac-universal = arm64(Apple M-series)+ x64(Intel)两架构并行;win-x64 只出测试安装包,不发 Release。"
+        description: "选择要构建的平台。macOS Universal = Apple Silicon + Intel x64 两架构并行;win-x64 只出测试安装包,不发 Release。"
         type: choice
         default: all
         options:
           - all
-          - mac-universal
-          - mac-arm64 (Apple M-series)
-          - mac-x64 (Intel)
-          - win-x64
+          - macOS Universal
+          - macOS Apple Silicon
+          - macOS Intel x64
           - linux-x64
+          - win-x64
 
 permissions:
   contents: write
 
 jobs:
-  select-matrix:
-    name: Select platforms
-    runs-on: ubuntu-latest
+  resolve-platforms:
+    name: Resolve Platforms
+    runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.set.outputs.matrix }}
     steps:
+      - uses: actions/checkout@v5
       - id: set
         env:
           EVENT_NAME: ${{ github.event_name }}
           PLATFORM: ${{ inputs.platform }}
-        run: |
-          python3 - <<'PY'
-          import json, os
-          all_platforms = [
-              {
-                  "name": "macOS-arm64",
-                  "os": "macos-14",
-                  "target": "aarch64-apple-darwin",
-                  "cli_bin": "wb-switch-darwin-arm64",
-                  "platform_tag": "darwin-arm64",
-                  "bundles": "app",
-                  "update_os": "macos",
-                  "update_arch": "aarch64",
-                  "update_bundle": "macos",
-                  "update_archive_name": "workbuddy-switch-macos-aarch64.app.tar.gz",
-              },
-              {
-                  "name": "macOS-x64",
-                  "os": "macos-14",
-                  "target": "x86_64-apple-darwin",
-                  "cli_bin": "wb-switch-darwin-x64",
-                  "platform_tag": "darwin-x64",
-                  "bundles": "app",
-                  "update_os": "macos",
-                  "update_arch": "x86_64",
-                  "update_bundle": "macos",
-                  "update_archive_name": "workbuddy-switch-macos-x86_64.app.tar.gz",
-              },
-              {
-                  "name": "win-x64",
-                  "os": "windows-latest",
-                  "target": "x86_64-pc-windows-msvc",
-                  "cli_bin": "wb-switch-win32-x64.exe",
-                  "platform_tag": "win32-x64",
-                  "bundles": "nsis",
-                  "update_os": "windows",
-                  "update_arch": "x86_64",
-                  "update_bundle": "nsis",
-                  "update_archive_name": "workbuddy-switch-windows-x86_64-setup.exe",
-              },
-              {
-                  "name": "linux-x64",
-                  "os": "ubuntu-latest",
-                  "target": "x86_64-unknown-linux-gnu",
-                  "cli_bin": "wb-switch-linux-x64",
-                  "platform_tag": "linux-x64",
-                  "bundles": "deb,appimage",
-                  "update_arch": "",
-              },
-          ]
-          event = os.environ.get("EVENT_NAME", "")
-          platform = (os.environ.get("PLATFORM") or "all").strip()
-          # 选项标签 → 矩阵 name;mac-universal = 两种架构并行编译(非 fat 二进制)
-          FRIENDLY = {
-              "mac-universal": ["macOS-arm64", "macOS-x64"],
-              "mac-arm64 (Apple M-series)": ["macOS-arm64"],
-              "mac-x64 (Intel)": ["macOS-x64"],
-          }
-          if event != "workflow_dispatch" or platform in ("", "all"):
-              selected = all_platforms
-          else:
-              names = FRIENDLY.get(platform, [platform])
-              selected = [p for p in all_platforms if p["name"] in names]
-              if not selected:
-                  raise SystemExit(f"unknown platform: {platform}")
-          matrix = json.dumps({"include": selected})
-          out = os.environ["GITHUB_OUTPUT"]
-          with open(out, "a", encoding="utf-8") as f:
-              f.write("matrix<<EOF\n")
-              f.write(matrix + "\n")
-              f.write("EOF\n")
-          PY
+        run: python3 scripts/resolve-platforms.py
 
   build:
-    name: ${{ matrix.name }}
-    needs: select-matrix
+    name: Build ${{ matrix.name }} Artifacts
+    needs: resolve-platforms
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.select-matrix.outputs.matrix) }}
+      matrix: ${{ fromJSON(needs.resolve-platforms.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      # 构建前应用 fork 身份补丁(identifier/pubkey/endpoints/GITHUB_OWNER)。
+      # ── 环境准备 ────────────────────────────────────────────────
+
+      # 构建前应用定制身份补丁(identifier/pubkey/endpoints/GITHUB_OWNER)。
       # 只改临时工作区,不落库;上游文件保持逐字节一致,可无缝同步。
-      - name: Apply fork identity patch
+      - name: Apply custom identity patch
         shell: bash
-        run: sh scripts/apply-patch.sh
+        run: bash scripts/apply-patch.sh
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 20
+
+      # 把 tag 版本(<上游>-xbuddy-<时间戳>)烘焙进 Cargo.toml/tauri.conf.json 等,
+      # 保证 app 内版本与 updater manifest 一致。否则 app 内是裸 <上游> 版本,
+      # 而 prerelease < 裸版本,更新器会永不推送。手动触发(非 tag)不烘焙。
+      - name: Bake suffixed version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: sh scripts/bump-version.sh "${GITHUB_REF_NAME#v}"
 
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
@@ -130,7 +70,7 @@ jobs:
 
       # cargo 缓存：依赖 + 编译产物，增量编译大幅提速（Cargo.lock 不变时命中）
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -149,7 +89,7 @@ jobs:
       # their large icons and drag arrow in headless macOS runners.
       - name: Set up Python for dmgbuild
         if: runner.os == 'macOS'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -162,6 +102,8 @@ jobs:
           "$DMGBUILD_VENV/bin/python" -m pip install --disable-pip-version-check --no-input \
             "dmgbuild==1.6.5"
           echo "$DMGBUILD_VENV/bin" >> "$GITHUB_PATH"
+
+      # ── 构建 ────────────────────────────────────────────────────
 
       # 前端构建产物（CLI 二进制 rust-embed 嵌入 + Tauri App 使用）
       - name: Build frontend
@@ -176,97 +118,43 @@ jobs:
           cargo build -p wb-switch-server --release --target ${{ matrix.target }}
           mkdir -p dist-bin
 
-      # 桌面 App（mac app / nsis exe / deb + AppImage）
+      # 桌面 App（mac app / nsis exe / deb + AppImage）；逻辑见 scripts/build-desktop-app.sh
+      # 注:所有平台都跑此步;脚本内部按 bundles 分支(仅 app 打 dmg,nsis 校验 .exe)。
       - name: Build desktop app
         shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          VER="${GITHUB_REF_NAME#v}"
-          if ! [[ "$VER" =~ ^[0-9] ]]; then
-            VER=$(grep '^version' src-tauri/Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
-          fi
-          BUNDLE_ROOT="target/${{ matrix.target }}/release/bundle"
-          # cargo cache 会保留旧 NSIS/DMG/AppImage；不清理就会把 0.1.17 一类产物带进 Release。
-          rm -rf "$BUNDLE_ROOT"
-          npm run tauri -- build --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
-          echo "bundle after build:"
-          find "$BUNDLE_ROOT" -type f | sort || true
-          if [ "${{ matrix.bundles }}" = "nsis" ]; then
-            STALE=$(find "$BUNDLE_ROOT" -type f -name '*-setup.exe' ! -name "workbuddy-switch_${VER}_x64-setup.exe" || true)
-            if [ -n "$STALE" ]; then
-              echo "error: stale Windows installer still present:" >&2
-              printf '%s\n' "$STALE" >&2
-              exit 1
-            fi
-            test -f "$BUNDLE_ROOT/nsis/workbuddy-switch_${VER}_x64-setup.exe"
-          fi
-          find "$BUNDLE_ROOT" -type f \
-            \( -name '*.dmg' -o -name '*.exe' -o -name '*.msi' -o -name '*.deb' \
-            -o -name '*.AppImage' \) \
-            -exec cp {} dist-bin/ \;
-          # mac：纯命令行打 dmg（CI 无 Finder，Tauri 自带的 bundle_dmg.sh 会失败）
-          if [ "${{ matrix.bundles }}" = "app" ]; then
-            sh scripts/make-dmg.sh "$VER" "${{ matrix.update_arch }}" "target/${{ matrix.target }}/release/bundle/macos/workbuddy-switch.app"
-            cp "workbuddy-switch_${VER}_${{ matrix.update_arch }}.dmg" dist-bin/
-          fi
+          bash scripts/build-desktop-app.sh "${{ matrix.target }}" "${{ matrix.bundles }}" "${{ matrix.update_arch }}" "${{ matrix.installer_names }}"
 
+      # updater 版本清单（签名包收集 + gen-update-json）；逻辑见 scripts/gen-manifest.sh
+      # 仅 mac/windows 需要;linux 的 update_arch 为空则跳过。
       - name: Generate updater manifest
         if: matrix.update_arch != ''
         shell: bash
-        env:
-          UPDATE_OS: ${{ matrix.update_os }}
-          UPDATE_ARCH: ${{ matrix.update_arch }}
-          UPDATE_ARCHIVE_NAME: ${{ matrix.update_archive_name }}
-          BUNDLE_DIR: target/${{ matrix.target }}/release/bundle/${{ matrix.update_bundle }}
         run: |
-          VER="${GITHUB_REF_NAME#v}"
-          if ! [[ "$VER" =~ ^[0-9] ]]; then
-            VER=$(grep '^version' src-tauri/Cargo.toml | head -1 | sed 's/.*"\(.*\)"/\1/')
-          fi
-          echo "updater bundle dir: $BUNDLE_DIR (version $VER)"
-          ls -la "$BUNDLE_DIR" || true
-          if [ "$UPDATE_OS" = "windows" ]; then
-            ARCHIVE="$BUNDLE_DIR/workbuddy-switch_${VER}_x64-setup.exe"
-          else
-            ARCHIVE="$(find "$BUNDLE_DIR" -maxdepth 1 -type f -name '*.app.tar.gz' | sort)"
-            COUNT=$(printf '%s\n' "$ARCHIVE" | sed '/^$/d' | wc -l | tr -d ' ')
-            if [ "$COUNT" != 1 ]; then
-              echo "error: expected exactly 1 .app.tar.gz, found $COUNT" >&2
-              printf '%s\n' "$ARCHIVE" >&2
-              exit 1
-            fi
-          fi
-          if [ ! -f "$ARCHIVE" ] || [ ! -f "$ARCHIVE.sig" ]; then
-            echo "error: missing signed updater archive ($ARCHIVE)" >&2
-            exit 1
-          fi
-          cp "$ARCHIVE" "dist-bin/$UPDATE_ARCHIVE_NAME"
-          cp "$ARCHIVE.sig" "dist-bin/$UPDATE_ARCHIVE_NAME.sig"
-          if [ "$UPDATE_OS" = "windows" ]; then
-            cmp -s "dist-bin/$UPDATE_ARCHIVE_NAME" "dist-bin/workbuddy-switch_${VER}_x64-setup.exe"
-          fi
-          UPDATE_VERSION="$VER" sh scripts/gen-update-json.sh "${GITHUB_REPOSITORY%/*}" "${GITHUB_REPOSITORY#*/}"
-          MANIFEST="$BUNDLE_DIR/latest-${UPDATE_OS}-${UPDATE_ARCH}.json"
-          test -f "$MANIFEST"
-          cp "$MANIFEST" dist-bin/
+          bash scripts/gen-manifest.sh \
+            "${{ matrix.target }}" "${{ matrix.update_os }}" "${{ matrix.update_arch }}" \
+            "${{ matrix.update_archive_name }}" "${{ matrix.update_bundle }}"
 
-      - uses: actions/upload-artifact@v4
+      # ── 产物收集 ────────────────────────────────────────────────
+
+      - uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.name }}
           path: dist-bin/
           if-no-files-found: error
 
   release:
-    name: Publish release assets
+    name: Publish Release Assets
     needs: build
     if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           path: artifacts
           merge-multiple: true
@@ -274,7 +162,13 @@ jobs:
       - name: Merge updater manifests
         run: python3 scripts/merge-update-manifests.py artifacts
 
+      # 重建 release,避免 softprops 只追加上传导致旧命名资产残留(同 tag 重跑也不冲突)。
+      - name: Reset Release Assets
+        run: gh release delete "${{ github.ref_name }}" --yes || true
+        env:
+          GH_TOKEN: ${{ github.token }}
+
       - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: artifacts/*

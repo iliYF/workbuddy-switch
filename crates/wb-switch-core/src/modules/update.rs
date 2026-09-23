@@ -106,10 +106,28 @@ pub fn save_github_config(cfg: &Value) -> std::io::Result<()> {
 }
 
 fn version_tuple(v: &str) -> Vec<i64> {
-    v.trim_start_matches('v')
+    let v = v.trim_start_matches('v');
+    let (base, pre) = match v.split_once('-') {
+        Some((base, pre)) => (base, Some(pre)),
+        None => (v, None),
+    };
+    let mut out: Vec<i64> = base
         .split('.')
         .filter_map(|x| x.parse::<i64>().ok())
-        .collect()
+        .collect();
+    // 带后缀的版本形如 <基数>-xbuddy-<时间戳>:预发布段最后一个数字作第 4 位,
+    // 让同基数下连续构建也能被 hasUpdate 识别为更新。
+    if let Some(pre) = pre {
+        if let Some(n) = pre
+            .split(['-', '.'])
+            .filter(|s| !s.is_empty())
+            .next_back()
+            .and_then(|x| x.parse::<i64>().ok())
+        {
+            out.push(n);
+        }
+    }
+    out
 }
 
 /// 版本比较：a > b 返回 1，a < b 返回 -1，相等返回 0。
@@ -356,5 +374,14 @@ mod tests {
         assert_eq!(compare_versions("0.1.18", "0.1.18"), 0);
         assert_eq!(compare_versions("0.1.19", "0.1.18"), 1);
         assert_eq!(compare_versions("v0.1.17", "0.1.18"), -1);
+    }
+
+    #[test]
+    fn compare_versions_with_suffix() {
+        // 带后缀版本 <基数>-xbuddy-<时间戳>:时间戳作第 4 位
+        assert_eq!(compare_versions("0.1.46-xbuddy-2026092209", "0.1.40"), 1);
+        assert_eq!(compare_versions("0.1.46-xbuddy-2026092210", "0.1.46-xbuddy-2026092209"), 1);
+        assert_eq!(compare_versions("0.1.47-xbuddy-20260922", "0.1.46-xbuddy-2026092210"), 1);
+        assert_eq!(compare_versions("0.1.46-xbuddy-20260922", "0.1.46-xbuddy-20260922"), 0);
     }
 }

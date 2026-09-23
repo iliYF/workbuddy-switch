@@ -66,7 +66,7 @@ import type {
 import { useAccountsStore } from "@/stores/accounts";
 import { cn } from "@/lib/utils";
 
-/** 托管网关(wb2api)项目主页兜底(fork);网关配置就绪时按钮改用其 source_url。 */
+/** 托管网关(wb2api)项目主页兜底(定制版);网关配置就绪时按钮改用其 source_url。 */
 const GATEWAY_REPO_URL = "https://github.com/iliYF/workbuddy2api";
 
 /** 从 GitHub 仓库地址提取作者(owner);非 github.com 地址返回 null。 */
@@ -821,7 +821,7 @@ export default function GatewayPage() {
   }, [oauthOpen, reconcileAccounts]);
 
   return (
-    <div className="mx-auto w-full max-w-[1180px] space-y-6 px-4 py-6 sm:px-8 sm:py-8">
+    <div className="mx-auto w-full min-w-0 max-w-[min(1600px,max(500px,calc(100%-3rem)))] space-y-6 px-4 py-6 sm:px-8 sm:py-9">
       <header className="mb-6 flex min-w-0 flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <h1 className="text-[28px] font-semibold tracking-tight">网关管理</h1>

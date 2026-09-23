@@ -21,10 +21,10 @@ pub fn gateway_root() -> PathBuf {
     home_dir().join(".wb-switch").join("gateway")
 }
 
-/// 本 fork 创建的网关文件/目录统一前缀,避免与其他 fork 共用网关目录时撞名。
+/// 本仓库创建的网关文件/目录统一前缀,避免与其他分叉仓库共用网关目录时撞名。
 pub const GATEWAY_PREFIX: &str = "wbs_";
 
-/// 网关默认监听端口:与宿主 webui 默认端口(57890,fork 构建产物 54320)相邻。
+/// 网关默认监听端口:与宿主 webui 默认端口(57890,定制构建产物 54320)相邻。
 pub const DEFAULT_GATEWAY_PORT: u16 = 54321;
 
 pub fn wb2api_config_file() -> PathBuf {

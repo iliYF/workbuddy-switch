@@ -21,9 +21,10 @@ import { useCreditAutoRefresh } from "@/lib/use-credit-auto-refresh";
 import { useRotateDeferredNotice } from "@/lib/use-rotate-deferred-notice";
 import { useWorkbuddyStatusRefresh } from "@/lib/use-workbuddy-status-refresh";
 import { useAccountsStore } from "@/stores/accounts";
+import { friendlyVersion } from "@/lib/version";
 
 function UpdateCenter({ running }: { running: boolean | undefined }) {
-  const version = useAccountsStore((s) => s.status?.version);
+  const version = friendlyVersion(useAccountsStore((s) => s.status?.version)).version;
   const [info, setInfo] = useState<UpdateInfo | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
 

@@ -1,17 +1,17 @@
 #!/bin/bash
-# apply-patch.sh — 构建前把上游仓库身份替换为 fork 身份(零侵入:只改临时工作区,不落库)。
+# apply-patch.sh — 构建前把上游仓库身份替换为定制身份(零侵入:只改临时工作区,不落库)。
 #
 # 用法: sh scripts/apply-patch.sh
 # 幂等:已应用过的目标打印 skip 并正常退出;重复运行安全。
 #
 # 结构:
-#   ① 替换对照:上游原始值(UPSTREAM_*) → fork 值,集中一处便于对比
+#   ① 替换对照:上游原始值(UPSTREAM_*) → 定制值,集中一处便于对比
 #   ② 按功能域分组(WEB 前端 / DESKTOP 桌面 / SERVER 服务),每类一个数组 + patch_* 函数
 # 还原(重置所有被补丁文件):
 #   git checkout -- "${WEB_FILES[@]}" "${DESKTOP_FILES[@]}" "${SERVER_FILES[@]}"
 set -euo pipefail
 
-# ── ① 替换对照:上游原始值 → fork 值 ──
+# ── ① 替换对照:上游原始值 → 定制值 ──
 UPSTREAM_BUNDLE_ID="com.wbswitch.app"              # → $BUNDLE_ID
 UPSTREAM_OWNER="changexbc"                         # → $GITHUB_OWNER
 UPSTREAM_PUBKEY="dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEYwNEU4RkQ5OEZCN0FGRApSV1Q5ZXZ1WS9lZ0VEd1VuVFpOYjU1OGJGd1NmMVhaWHJTSEdnNVRSSEcweUxWR05TN0h2WnloSwo="  # → $UPDATER_PUBKEY
@@ -21,17 +21,17 @@ UPSTREAM_PORT="57890"                              # → $APP_PORT
 UPSTREAM_PRODUCT="workbuddy-switch"                # → $PRODUCT_NAME
 UPSTREAM_TITLE="workbuddy-switch · WorkBuddy 账号切换"  # → $PRODUCT_TITLE
 
-# ── fork 值(替换目标)──
+# ── 定制值(替换目标)──
 BUNDLE_ID="com.xstart.wbswitch"
 GITHUB_OWNER="iliYF"
-GITHUB_REPO="workbuddy-switch"
+GITHUB_REPO="xbuddy-switch"
 UPDATER_PUBKEY="dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQzNEVGMDQwMDQyQjlCNUEKUldSYW15c0VRUEJPMCtLdytNSUYzOFYrTXVGS0lsOGV3R1E2T1hoWVp1TnJFVGYyblZtdTNFaHoK"
 # 签名密钥文件名(与 ~/.wb-switch 下生成的密钥对配套;密码只在环境变量/Secret,不写进仓库)
 SIGNING_KEY_FILE="wb-switch-gw.key"
-# fork 端口:与网关默认端口 54321 相邻,避免与上游默认 57890 撞端口。
+# 定制端口:与网关默认端口 54321 相邻,避免与上游默认 57890 撞端口。
 APP_PORT="54320"
 # 产品名:显示在打包 .app 名/窗口/托盘/通知/侧栏。
-PRODUCT_NAME="WB Switch"
+PRODUCT_NAME="xBuddy Switch"
 PRODUCT_TITLE="$PRODUCT_NAME · WorkBuddy 账号管理 + 兼容网关"
 # 主二进制/exe 名:保持上游完整名 workbuddy-switch,现有自识别条件(匹配 workbuddy-switch/wb-switch)天然覆盖。
 MAIN_BINARY="workbuddy-switch"
@@ -47,6 +47,8 @@ DESKTOP_FILES=(
   src-tauri/src/tray.rs
   package.json
   scripts/fix-app.sh
+  scripts/build-desktop-app.sh
+  scripts/make-dmg.sh
   crates/wb-switch-core/src/modules/rotate.rs
 )
 # SERVER:本地服务——更新源身份、默认端口
@@ -87,6 +89,8 @@ patch_web() {
   replace src/lib/api.ts "http://127.0.0.1:$UPSTREAM_PORT" "http://127.0.0.1:$APP_PORT"
   # 前端更新源 owner
   replace src/lib/update.ts "GITHUB_OWNER = \"$UPSTREAM_OWNER\"" "GITHUB_OWNER = \"$GITHUB_OWNER\""
+  # 前端更新源仓库名(此前遗漏)
+  replace src/lib/update.ts "GITHUB_REPO = \"$UPSTREAM_PRODUCT\"" "GITHUB_REPO = \"$GITHUB_REPO\""
   # 原生标题栏接管后,自绘拖拽区/Overlay 间距关闭;侧栏品牌同步
   replace src/App.tsx \
     'api.isDesktop() && typeof navigator !== "undefined" && navigator.userAgent.includes("Macintosh")' \
@@ -100,6 +104,8 @@ patch_web() {
 patch_desktop() {
   # tauri.conf.json:身份(bundle id/更新源/签名公钥)+ 产品名 + 原生标题栏
   replace src-tauri/tauri.conf.json "$UPSTREAM_BUNDLE_ID" "$BUNDLE_ID"
+  # updater 端点完整替换:changexbc/workbuddy-switch/releases → iliYF/xbuddy-switch/releases
+  replace src-tauri/tauri.conf.json "github.com/$UPSTREAM_OWNER/$UPSTREAM_PRODUCT/releases" "github.com/$GITHUB_OWNER/$GITHUB_REPO/releases"
   replace src-tauri/tauri.conf.json "github.com/$UPSTREAM_OWNER/" "github.com/$GITHUB_OWNER/"
   replace src-tauri/tauri.conf.json "$UPSTREAM_PUBKEY" "$UPDATER_PUBKEY"
   # 主二进制名独立于产品名(保持完整 workbuddy-switch),现有自识别条件天然覆盖,无需改 Rust。
@@ -107,7 +113,7 @@ patch_desktop() {
     "\"productName\": \"$PRODUCT_NAME\",
   \"mainBinaryName\": \"$MAIN_BINARY\""
   replace src-tauri/tauri.conf.json "\"title\": \"$UPSTREAM_TITLE\"" "\"title\": \"$PRODUCT_TITLE\""
-  # 原生可见标题栏(标题显示在系统标题栏,不依赖自绘),仅 macOS fork 生效。
+  # 原生可见标题栏(标题显示在系统标题栏,不依赖自绘),仅 macOS 定制版生效。
   replace src-tauri/tauri.conf.json '"titleBarStyle": "Overlay"' '"titleBarStyle": "Visible"'
   replace src-tauri/tauri.conf.json '"hiddenTitle": true' '"hiddenTitle": false'
   # 托盘 tooltip
@@ -119,6 +125,9 @@ patch_desktop() {
     'TAURI_SIGNING_PRIVATE_KEY_PASSWORD=\${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:?}'
   # 本地 build:app 收尾 fix-app.sh 按 .app 目录名找包(CI 侧 make-dmg 走 ci 分支另行对齐)
   replace scripts/fix-app.sh "bundle/macos/$UPSTREAM_PRODUCT.app" "bundle/macos/$PRODUCT_NAME.app"
+  # CI 打 dmg 的 .app 路径:包名随产品名变化,与 fix-app 同款处理(路径含空格,脚本内均双引号引用)
+  replace scripts/build-desktop-app.sh "macos/$UPSTREAM_PRODUCT.app" "macos/$PRODUCT_NAME.app"
+  replace scripts/make-dmg.sh "bundle/macos/$UPSTREAM_PRODUCT.app" "bundle/macos/$PRODUCT_NAME.app"
   # 桌面通知标题(core 组装 + 宿主兜底)
   replace crates/wb-switch-core/src/modules/rotate.rs \
     "ROTATE_NOTIFY_TITLE: &str = \"$UPSTREAM_PRODUCT\"" "ROTATE_NOTIFY_TITLE: &str = \"$PRODUCT_NAME\""
@@ -130,6 +139,9 @@ patch_desktop() {
 patch_server() {
   replace crates/wb-switch-core/src/modules/update.rs \
     "GITHUB_OWNER: &str = \"$UPSTREAM_OWNER\"" "GITHUB_OWNER: &str = \"$GITHUB_OWNER\""
+  # 服务端更新源仓库名(此前遗漏)
+  replace crates/wb-switch-core/src/modules/update.rs \
+    "GITHUB_REPO: &str = \"$UPSTREAM_PRODUCT\"" "GITHUB_REPO: &str = \"$GITHUB_REPO\""
   replace crates/wb-switch-server/src/main.rs "$UPSTREAM_PORT" "$APP_PORT"
 }
 

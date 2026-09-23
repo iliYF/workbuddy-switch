@@ -1,0 +1,91 @@
+# sync-upstream.yml — 定时把上游 changexbc/workbuddy-switch 的 main 合并进本仓库。
+# 只同步 main 分支;合并后若上游发布了新版本(chore: 发布 X.Y.Z),
+# 自动打带后缀版本 tag v<上游>-xbuddy-<时间戳> 到同步后的 HEAD,触发 release.yaml 构建。
+# 一次同步含多个版本发布时只发最新一版(中间版本被最新版包含,更新源直接跳到最新)。
+# 直接用 git 合并上游并用 secrets.GH_PAT 推送(须带 repo + workflow scope):
+# 上游提交若改动 .github/workflows/*,GITHUB_TOKEN 推送会被 GitHub 以
+# "GitHub App 无 workflows 权限"拒绝。
+name: Sync Upstream
+
+on:
+  schedule:
+    # 每天 UTC 21:45(北京次日 05:45),错开整点高峰与 workbuddy2api 的 20:21。
+    - cron: "45 21 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    name: Sync latest commits from upstream
+    runs-on: ubuntu-latest
+    if: ${{ github.event.repository.fork }}
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Sync upstream main
+        id: sync
+        env:
+          SYNC_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          set -eu
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote remove upstream 2>/dev/null || true
+          git remote add upstream https://github.com/changexbc/workbuddy-switch.git
+          git fetch upstream main
+          OLD_HEAD=$(git rev-parse HEAD)
+          echo "old_head=$OLD_HEAD" >> "$GITHUB_OUTPUT"
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "==> 上游 main 无新提交,无需同步"
+            exit 0
+          fi
+          if [ -z "${SYNC_PAT:-}" ]; then
+            echo "::error::secrets.GH_PAT 为空,无法推送(上游可能改动 workflow 文件)"
+            exit 1
+          fi
+          git merge --no-edit upstream/main
+          git push "https://x-access-token:${SYNC_PAT}@github.com/${GITHUB_REPOSITORY}.git" HEAD:main
+
+      # 同步后自动发版:扫本次新引入的 chore: 发布 X.Y.Z,取最新上游版本,
+      # 打带后缀版本 tag v<上游>-xbuddy-<时间戳> 到同步后的 HEAD。
+      # 无发布 commit / 该上游版本已发过后缀 tag / 未配 PAT 时跳过,不阻塞同步。
+      - name: Auto-tag latest upstream release
+        env:
+          TAG_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          set -eu
+          OLD_HEAD="${{ steps.sync.outputs.old_head }}"
+          if [ -z "$OLD_HEAD" ]; then
+            echo "::warning::未取到同步前 HEAD,跳过自动发版"
+            exit 0
+          fi
+          NEW_SUBJECTS=$(git log --no-merges --format='%s' "$OLD_HEAD..HEAD" 2>/dev/null || true)
+          VER=$(printf '%s\n' "$NEW_SUBJECTS" | sed -nE 's/^chore: 发布[[:space:]]+v?([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' | head -1)
+          if [ -z "$VER" ]; then
+            echo "==> 本次同步无 chore: 发布 commit,跳过自动发版"
+            exit 0
+          fi
+          if git tag -l "v${VER}-xbuddy-*" | grep -q .; then
+            echo "==> $VER 已发过后缀版(v${VER}-xbuddy-*),跳过"
+            exit 0
+          fi
+          if [ -z "${TAG_PAT:-}" ]; then
+            echo "::warning::未配置 secrets.GH_PAT,跳过自动打 tag v${VER}-xbuddy-*"
+            exit 0
+          fi
+          SUFFIX_TAG="v${VER}-xbuddy-$(date +%Y%m%d%H%M)"
+          git tag "$SUFFIX_TAG"
+          git push "https://x-access-token:${TAG_PAT}@github.com/${GITHUB_REPOSITORY}.git" "$SUFFIX_TAG"
+          echo "==> 已打 tag $SUFFIX_TAG 并推送,release.yaml 将触发构建"
+
+      - name: Sync check
+        if: failure()
+        run: |
+          echo "::error::同步失败。常见原因:GH_PAT 缺 workflow scope(上游改动 workflow 文件)、合并冲突。详见上方日志。"
+          exit 1

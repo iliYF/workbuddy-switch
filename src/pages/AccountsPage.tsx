@@ -749,7 +749,7 @@ export default function AccountsPage() {
     : "未安装";
   const codebuddyUsesSettingsEnv = codebuddyCli?.authMode === "settings-env";
   return (
-    <div className="mx-auto w-full max-w-[1180px] px-6 py-8 sm:px-8 sm:py-9">
+    <div className="mx-auto w-full min-w-0 max-w-[min(1600px,max(500px,calc(100%-3rem)))] px-4 py-6 sm:px-8 sm:py-9">
       <header className="mb-6">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">

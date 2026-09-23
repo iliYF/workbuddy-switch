@@ -28,6 +28,7 @@ import { UpdateInstallDialog } from "@/components/update-install-dialog";
 import { DemoAction } from "@/components/demo-action";
 import { AboutCard } from "@/components/about-card";
 import { useAccountsStore } from "@/stores/accounts";
+import { friendlyVersion } from "@/lib/version";
 
 interface SettingsGroupProps {
   id: string;
@@ -645,7 +646,10 @@ function useAuthFile(): string | undefined {
 
 /** 自动更新：检查公开 GitHub Releases 源 + 安装签名更新。 */
 function UpdateCard() {
-  const version = useAccountsStore((s) => s.status?.version);
+  const rawVersion = useAccountsStore((s) => s.status?.version);
+  const { version, buildTime, full } = friendlyVersion(rawVersion);
+  const buildLabel = buildTime ? `构建 ${buildTime}` : "";
+  const versionTitle = buildTime ? full : undefined;
   const [info, setInfo] = useState<UpdateInfo | null>(null);
   const [checking, setChecking] = useState(false);
   const [installOpen, setInstallOpen] = useState(false);
@@ -722,7 +726,10 @@ function UpdateCard() {
     >
       <CardContent className="space-y-0 p-0">
         <div className="border-b border-border/60 px-4 py-3 text-sm sm:px-5">
-          当前版本：<span className="font-mono">v{version || "?"}</span>
+          当前版本：<span className="font-mono" title={versionTitle}>v{version || "?"}</span>
+          {buildLabel && (
+            <span className="ml-2 text-xs text-muted-foreground">{buildLabel}</span>
+          )}
         </div>
 
         <div className="flex min-w-0 items-center justify-between gap-3 border-b border-border/60 bg-muted/25 px-4 py-3 text-sm sm:px-5">
@@ -1145,20 +1152,20 @@ function RateLimitCard() {
 /** 设置页：自动签到配置 / 权限检测 / 更新配置。 */
 export default function SettingsPage() {
   return (
-    <div className="mx-auto w-full max-w-[1180px] min-w-0 px-4 py-6 sm:px-8 sm:py-9">
+    <div className="mx-auto w-full min-w-0 max-w-[min(1600px,max(500px,calc(100%-3rem)))] px-4 py-6 sm:px-8 sm:py-9">
       <header className="mb-10 sm:mb-12">
-        <h1 className="text-2xl font-semibold tracking-tight">设置</h1>
+        <h1 className="text-[28px] font-semibold tracking-tight">设置</h1>
         <p className="mt-2 text-sm leading-6 text-muted-foreground">自动签到、限额监听、权限检测与自动更新配置。</p>
       </header>
 
-      <div className="min-w-0 space-y-12">
+      <div className="min-w-0 space-y-6">
         <AppearanceCard />
         <PermissionCheckCard />
         <AutoCheckinCard />
         <AutoRotateCard />
         <RateLimitCard />
         {api.isDesktop() || api.isDemoMode() ? <StartupCard /> : null}
-        {api.isWebui() && !api.isDemoMode() ? null : <UpdateCard />}
+        <UpdateCard />
         <AboutCard />
       </div>
     </div>
